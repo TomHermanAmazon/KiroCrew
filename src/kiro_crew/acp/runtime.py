@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, NamedTuple, TypeVar
 from kiro_crew import (
     acp_tool_gate,
     agent_scratch,
+    mcp_declined_home,
     member_essential_context,
     platform_compat,
     runtime_death,
@@ -6687,6 +6688,7 @@ class AcpRuntime:
         member_dispatch: bool = False,
         crew_panel: bool = False,
         session_key: str = "",
+        session_work_dir: str | Path | None = None,
     ) -> SessionExtras:
         """The per-session payload for a wire-registered host, and what built it.
 
@@ -6711,6 +6713,7 @@ class AcpRuntime:
             member_dispatch=member_dispatch,
             crew_panel=crew_panel,
             session_key=session_key,
+            session_work_dir=session_work_dir,
         )
         # Judged HERE, on the payload, so every path that builds one -- session/new
         # and session/load alike -- is covered, and a host that builds none (kiro:
@@ -7087,6 +7090,35 @@ class AcpRuntime:
             )
         return entries, token
 
+    async def _with_declined_home_servers(
+        self, entries: list[dict[str, Any]], agent: str | None, work_dir: str | Path
+    ) -> list[dict[str, Any]]:
+        """Append the ``mcp.json`` servers a refused shared spec cannot carry.
+
+        Empty unless this instance is refused the shared agent home (see
+        :mod:`kiro_crew.mcp_declined_home`). Called AFTER the stub session token is
+        attached, so a third-party server's environment never receives it, and with
+        every name already in the array, so nothing is registered twice.
+
+        Kiro only. KAS mounts ``~/.kiro/settings/mcp.json`` itself, each server
+        with its own environment, and lacks only the ``tools`` grant, which
+        ``KasHarness.session_extras`` adds (:func:`mcp_declined_home.kas_tool_grants`).
+        A delivered copy there would shadow that native mount with one the wire
+        carried, credentials included.
+        """
+        if self.acp_backend == ACP_BACKEND_KIRO:
+            extra = await asyncio.to_thread(
+                mcp_declined_home.session_servers,
+                agent or self._agent,
+                work_dir=work_dir,
+                present={str(entry.get("name")) for entry in entries},
+                spec=mcp_declined_home.session_spec(
+                    getattr(self, "_native_skill_projection", None), agent or self._agent
+                ),
+            )
+            return entries + extra if extra else entries
+        return entries
+
     async def _unpooled_control_planes(
         self, entries: list[dict[str, Any]], agent: str | None, work_dir: str | Path
     ) -> list[dict[str, Any]]:
@@ -7324,6 +7356,9 @@ class AcpRuntime:
                     pooled, agent or self._agent, session_work_dir
                 )
                 mcp_servers, stub_token = await self._own_stub_session(mcp_servers, session_key)
+                mcp_servers = await self._with_declined_home_servers(
+                    mcp_servers, agent or self._agent, session_work_dir
+                )
         else:
             # An explicit array is the caller's own composition (a mirror's
             # projection, a test double); it is not this method's to re-key, and it
@@ -7414,6 +7449,9 @@ class AcpRuntime:
             # the mount and the grant together so the two cannot disagree.
             crew_panel=panel_mounted,
             session_key=session_key,
+            # The session's own checkout, not the runtime's first one: the grant's
+            # workspace collision check must read the mcp.json KAS mounts here.
+            session_work_dir=session_work_dir,
         )
         kas_agents = kas_extras.custom_agents
         # The generation the wire payload was built from, or None when this host takes its
@@ -8244,6 +8282,9 @@ class AcpRuntime:
                 pooled, active_agent, session_work_dir
             )
             mcp_servers, stub_token = await self._own_stub_session(mcp_servers, session_key)
+            mcp_servers = await self._with_declined_home_servers(
+                mcp_servers, active_agent, session_work_dir
+            )
         member_withheld = False
         # Whether the member session-control entry is IN the array, the one fact
         # the context builder needs to teach the session_* tools truthfully.
@@ -8353,6 +8394,7 @@ class AcpRuntime:
                 member_dispatch=bool(member_session_key) and not member_withheld,
                 crew_panel=panel_mounted,
                 session_key=session_key,
+                session_work_dir=session_work_dir,
             )
             kas_agents = kas_extras.custom_agents
             payload_snapshot = kas_extras.derived_spec_snapshot
