@@ -9137,7 +9137,8 @@
       "tag_shared": "공유됨",
       "unsaved_changes": "저장되지 않은 변경",
       "webhook_unbound_short": "바인딩된 토큰 없음",
-      "wire_what_it_works_with": "무엇으로 작동하는지"
+      "wire_what_it_works_with": "무엇으로 작동하는지",
+      "unsaved_in_pane": "저장되지 않음 — 이 섹션의 저장을 사용하세요"
     },
     "awsConsentGate": {
       "confirm_title": "첫 요청 전에 AWS 사용 확인",
@@ -18772,7 +18773,7 @@
     "restore_confirm": "다음 {{productName}} 게이트웨이 재시작 때 이 백업을 복원합니다. 복원 전에 현재 메모리를 저장소 옆에 보관합니다.",
     "tab_memories": "기억",
     "tab_profile": "프로필",
-    "tab_recovery": "복구",
+    "tab_recovery": "백업",
     "advanced": "고급 기억 분석",
     "filter_all": "전체",
     "clear_search": "검색 지우기",
@@ -18915,7 +18916,6 @@
     "editor_aria": "새 크루메이트 편집기",
     "section_general": "일반",
     "section_built_from": "기반",
-    "section_behavior": "동작",
     "section_memory": "메모리",
     "section_danger": "위험 구역",
     "tab_details": "세부 정보",
@@ -18923,12 +18923,10 @@
     "tab_mcp": "MCP 서버",
     "tab_skills": "스킬",
     "tab_approvals": "승인",
-    "tab_model": "모델",
-    "tab_triggers": "트리거",
     "tab_schedules": "일정",
     "tab_webhooks": "웹후크",
     "tab_profile": "프로필",
-    "tab_recovery": "복구",
+    "tab_recovery": "백업",
     "state_from_template": "템플릿에서",
     "state_added": "이 크루메이트에 추가됨",
     "state_removed": "이 크루메이트에서 제거됨",
@@ -18946,7 +18944,6 @@
     "built_from_body": "이 크루메이트의 도구, MCP 서버, 스킬은 이 템플릿에서 가져옵니다. 정확히 무엇이 포함되는지는 위 탭에서 확인하세요. 상속된 항목이라 여기서는 변경할 수 없습니다. 템플릿은 에이전트 페이지에서 편집하고, 다른 템플릿으로의 전환은 일반에서 합니다.",
     "template_unavailable": "이 템플릿은 현재 이 컴퓨터에 설치되어 있지 않아 크루메이트가 기본값으로 대체됩니다. {{name}} 을(를) 설치하거나 복원하면 모든 기능이 돌아옵니다.",
     "template_authored": "이 템플릿은 직접 만든 것이므로 에이전트 페이지에서 바로 편집할 수 있습니다.",
-    "triggers_frame": "트리거는 누군가 이미 시작한 작업에 오케스트레이터가 이 크루메이트를 선택하는 시점을 결정합니다. 스스로 깨어나는 것이 아니라 선택되는 것에 관한 것입니다.",
     "schedules_heading": "일정",
     "schedules_blurb": "시간 기반 깨우기: 이 크루메이트는 사람이 없어도 일정에 따라 턴을 시작합니다. 트리거(누군가의 작업에 선택되는 것)와 달리, 여기서는 스스로 행동합니다.",
     "webhooks_frame": "외부 시스템이 호출하여 이 크루메이트를 깨웁니다. 토큰 발급과 취소는 웹후크 페이지에 그대로 있습니다.",
@@ -18958,7 +18955,6 @@
     "memory_profile_frame": "이 크루메이트가 학습하면서 당신과 자신의 작업에 대해 적는 메모로, 모든 세션에 이어집니다. 읽고 편집할 수 있으며, 크루메이트도 계속 업데이트합니다.",
     "sections_aria": "크루메이트 설정 섹션",
     "builtfrom_sections_aria": "기반 섹션",
-    "behavior_sections_aria": "동작 섹션",
     "memory_sections_aria": "메모리 섹션",
     "state_disabled_word": "비활성화됨",
     "switch_own_copy_title": "이 메이트 전용 복사본에서 전환할까요?",
@@ -18987,6 +18983,10 @@
     "state_removed": "제거됨",
     "driftHint": "{{member}}의 에이전트 파일이 이 페이지 밖에서 편집되었습니다. '변경 검토'를 누르면 그 외부 편집을 내 초안과 함께 볼 수 있고, 이후 '저장'이 수정을 기록하거나 할 수 없는 이유를 알려줍니다.",
     "sourceFailed": "저장된 구성을 검증할 수 없습니다. 서버에서 다시 불러와 재시도하세요.",
-    "runtime_failed": "런타임 로딩에 실패했습니다. 저장된 버전은 유지됩니다."
+    "runtime_failed": "런타임 로딩에 실패했습니다. 저장된 버전은 유지됩니다.",
+    "server_verb_count": "{{total}}개 중 {{on}}개 자동 승인",
+    "server_allow_aria": "{{server}} 허용",
+    "server_no_verbs": "자동 승인된 도구 없음",
+    "server_glob_covered": "전체 자동 승인 — 도구를 하나씩 선택하려면 서버를 끄세요"
   }
 }

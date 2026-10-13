@@ -9413,7 +9413,8 @@
       "tag_shared": "Condiviso",
       "unsaved_changes": "Modifiche non salvate",
       "webhook_unbound_short": "Nessun token associato",
-      "wire_what_it_works_with": "Con cosa lavora"
+      "wire_what_it_works_with": "Con cosa lavora",
+      "unsaved_in_pane": "Non salvato — usa Salva in questa sezione"
     },
     "awsConsentGate": {
       "confirm_title": "Conferma l'uso di AWS prima della prima richiesta",
@@ -19330,7 +19331,7 @@
     "restore_confirm": "Prepara questo backup per il prossimo riavvio del gateway {{productName}}. La memoria attuale viene salvata accanto all'archivio prima del ripristino.",
     "tab_memories": "Ricordi",
     "tab_profile": "Profilo",
-    "tab_recovery": "Recupero",
+    "tab_recovery": "Backup",
     "advanced": "Analisi avanzata della memoria",
     "filter_all": "Tutti",
     "clear_search": "Cancella ricerca",
@@ -19473,7 +19474,6 @@
     "editor_aria": "Editor nuovo compagno",
     "section_general": "Generale",
     "section_built_from": "Basato su",
-    "section_behavior": "Comportamento",
     "section_memory": "Memoria",
     "section_danger": "Zona pericolosa",
     "tab_details": "Dettagli",
@@ -19481,12 +19481,10 @@
     "tab_mcp": "Server MCP",
     "tab_skills": "Competenze",
     "tab_approvals": "Approvazioni",
-    "tab_model": "Modello",
-    "tab_triggers": "Trigger",
     "tab_schedules": "Pianificazioni",
     "tab_webhooks": "Webhook",
     "tab_profile": "Profilo",
-    "tab_recovery": "Ripristino",
+    "tab_recovery": "Backup",
     "state_from_template": "Dal modello",
     "state_added": "Aggiunto su questo compagno",
     "state_removed": "Rimosso su questo compagno",
@@ -19504,7 +19502,6 @@
     "built_from_body": "Gli strumenti, i server MCP e le competenze di questo compagno provengono da questo modello: guarda le schede qui sopra per vedere esattamente cosa include. Sono ereditati e non modificabili qui; modifica il modello nella pagina Agenti o passa questo compagno a un altro in Generale.",
     "template_unavailable": "Questo modello al momento non è installato su questa macchina, quindi il compagno ricade sui valori predefiniti. Installa o ripristina {{name}} per restituirgli tutte le sue capacità.",
     "template_authored": "Hai creato tu questo modello, quindi puoi modificarlo direttamente nella pagina Agenti.",
-    "triggers_frame": "I trigger decidono quando l’orchestratore sceglie questo compagno per un’attività già avviata da qualcuno: si tratta di selezione, non di auto-attivazione.",
     "schedules_heading": "Pianificazioni",
     "schedules_blurb": "Risvegli a orario: questo compagno avvia un turno secondo una pianificazione, senza nessuno presente. A differenza dei trigger — che riguardano l’essere scelto per l’attività di qualcuno — qui agisce di propria iniziativa.",
     "webhooks_frame": "I sistemi esterni risvegliano questo compagno chiamandolo. La creazione e la revoca dei token restano nella pagina Webhook.",
@@ -19516,7 +19513,6 @@
     "memory_profile_frame": "Note che questo compagno scrive su di te e sul suo lavoro man mano che impara, e che porta in ogni sessione. Puoi leggerle e modificarle; il compagno continua ad aggiornarle.",
     "sections_aria": "Sezioni delle impostazioni del compagno",
     "builtfrom_sections_aria": "Sezioni Basato su",
-    "behavior_sections_aria": "Sezioni Comportamento",
     "memory_sections_aria": "Sezioni Memoria",
     "state_disabled_word": "disattivato",
     "switch_own_copy_title": "Abbandonare la copia propria di questo mate?",
@@ -19545,6 +19541,10 @@
     "state_removed": "rimosso",
     "driftHint": "Il file dell'agente di {{member}} è stato modificato fuori da questa pagina. Premi «Rivedi modifica» per vedere quella modifica esterna insieme alla tua bozza; «Salva» applica poi la correzione o spiega perché non può.",
     "sourceFailed": "Impossibile convalidare la configurazione salvata. Ricaricala dal server per riprovare.",
-    "runtime_failed": "Caricamento del runtime non riuscito. La versione salvata rimane."
+    "runtime_failed": "Caricamento del runtime non riuscito. La versione salvata rimane.",
+    "server_verb_count": "{{on}} di {{total}} approvati automaticamente",
+    "server_allow_aria": "Consenti {{server}}",
+    "server_no_verbs": "Nessuno strumento approvato automaticamente",
+    "server_glob_covered": "Approvato automaticamente nel complesso — disattiva il server per scegliere gli strumenti uno a uno"
   }
 }

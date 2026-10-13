@@ -9137,7 +9137,8 @@
       "tag_shared": "共享",
       "unsaved_changes": "未保存的改动",
       "webhook_unbound_short": "没有绑定的 token",
-      "wire_what_it_works_with": "它用什么工作"
+      "wire_what_it_works_with": "它用什么工作",
+      "unsaved_in_pane": "未保存 — 请使用本区块的「保存」"
     },
     "awsConsentGate": {
       "confirm_title": "首次请求前确认 AWS 用量",
@@ -18772,7 +18773,7 @@
     "restore_confirm": "暂存此备份，在下次 {{productName}} 网关重启时恢复。恢复前会在记忆库旁保存当前记忆。",
     "tab_memories": "记忆",
     "tab_profile": "成员资料",
-    "tab_recovery": "恢复",
+    "tab_recovery": "备份",
     "advanced": "高级记忆分析",
     "filter_all": "全部",
     "clear_search": "清除搜索",
@@ -18915,7 +18916,6 @@
     "editor_aria": "新建队友编辑器",
     "section_general": "常规",
     "section_built_from": "构建来源",
-    "section_behavior": "行为",
     "section_memory": "记忆",
     "section_danger": "危险区域",
     "tab_details": "详情",
@@ -18923,12 +18923,10 @@
     "tab_mcp": "MCP 服务器",
     "tab_skills": "技能",
     "tab_approvals": "审批",
-    "tab_model": "模型",
-    "tab_triggers": "触发器",
     "tab_schedules": "定时任务",
     "tab_webhooks": "Webhook",
     "tab_profile": "档案",
-    "tab_recovery": "恢复",
+    "tab_recovery": "备份",
     "state_from_template": "来自模板",
     "state_added": "在此队友上添加",
     "state_removed": "在此队友上移除",
@@ -18946,7 +18944,6 @@
     "built_from_body": "此队友的工具、MCP 服务器和技能来自该模板——具体包含哪些请查看上方的标签页。这些是继承而来的，无法在此更改；在“代理”页面编辑模板，或在“常规”中将此队友切换到其他模板。",
     "template_unavailable": "该模板目前未安装在此机器上，因此此队友回退到默认配置。安装或恢复 {{name}} 以恢复其全部能力。",
     "template_authored": "这个模板是你编写的，你可以在“代理”页面直接编辑它。",
-    "triggers_frame": "触发器决定编排器何时为别人已发起的任务选中此队友——这是关于被选中，而非自行唤醒。",
     "schedules_heading": "定时任务",
     "schedules_blurb": "基于时钟的唤醒：此队友按计划自行开始一轮工作，无需人在场。与触发器不同——触发器是为别人的任务被选中；这里是自行行动。",
     "webhooks_frame": "外部系统通过调用来唤醒此队友。令牌的签发和吊销仍在 Webhook 页面进行。",
@@ -18958,7 +18955,6 @@
     "memory_profile_frame": "此队友在学习过程中记录的关于你和它工作的笔记——会带入每一次会话。你可以阅读和编辑它们；队友也会持续更新。",
     "sections_aria": "队友设置分区",
     "builtfrom_sections_aria": "构建来源分区",
-    "behavior_sections_aria": "行为分区",
     "memory_sections_aria": "记忆分区",
     "state_disabled_word": "已禁用",
     "switch_own_copy_title": "要离开此伙伴的专属副本吗？",
@@ -18987,6 +18983,10 @@
     "state_removed": "已移除",
     "driftHint": "{{member}} 的智能体文件在此页面之外被编辑过。点击“查看更改”即可将该外部编辑与你自己的草稿一起查看；随后“保存”会写入修复，或说明为何无法保存。",
     "sourceFailed": "无法验证已保存的配置。请从服务器重新加载后重试。",
-    "runtime_failed": "运行时加载失败。已保存的版本仍保留。"
+    "runtime_failed": "运行时加载失败。已保存的版本仍保留。",
+    "server_verb_count": "{{total}} 项中已自动批准 {{on}} 项",
+    "server_allow_aria": "允许 {{server}}",
+    "server_no_verbs": "没有自动批准的工具",
+    "server_glob_covered": "作为整体自动批准 — 关闭该服务器可逐个选择工具"
   }
 }

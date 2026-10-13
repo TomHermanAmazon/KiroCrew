@@ -9413,7 +9413,8 @@
       "tag_shared": "Compartilhado",
       "unsaved_changes": "Alterações não salvas",
       "webhook_unbound_short": "Sem tokens vinculados",
-      "wire_what_it_works_with": "Com o que trabalha"
+      "wire_what_it_works_with": "Com o que trabalha",
+      "unsaved_in_pane": "Não salvo — use Salvar nesta seção"
     },
     "awsConsentGate": {
       "confirm_title": "Confirme o uso da AWS antes da primeira solicitacao",
@@ -19330,7 +19331,7 @@
     "restore_confirm": "Prepare este backup para a próxima reinicialização do gateway do {{productName}}. A memória atual é salva ao lado do armazenamento antes da restauração.",
     "tab_memories": "Lembranças",
     "tab_profile": "Perfil",
-    "tab_recovery": "Recuperação",
+    "tab_recovery": "Backups",
     "advanced": "Análise avançada da memória",
     "filter_all": "Todas",
     "clear_search": "Limpar pesquisa",
@@ -19473,7 +19474,6 @@
     "editor_aria": "Editor de novo colega",
     "section_general": "Geral",
     "section_built_from": "Baseado em",
-    "section_behavior": "Comportamento",
     "section_memory": "Memória",
     "section_danger": "Zona de perigo",
     "tab_details": "Detalhes",
@@ -19481,12 +19481,10 @@
     "tab_mcp": "Servidores MCP",
     "tab_skills": "Habilidades",
     "tab_approvals": "Aprovações",
-    "tab_model": "Modelo",
-    "tab_triggers": "Gatilhos",
     "tab_schedules": "Agendamentos",
     "tab_webhooks": "Webhooks",
     "tab_profile": "Perfil",
-    "tab_recovery": "Recuperação",
+    "tab_recovery": "Backups",
     "state_from_template": "Do modelo",
     "state_added": "Adicionado neste colega",
     "state_removed": "Removido neste colega",
@@ -19504,7 +19502,6 @@
     "built_from_body": "As ferramentas, os servidores MCP e as habilidades deste colega vêm deste modelo — veja as abas acima para saber exatamente o que inclui. São herdadas e não podem ser alteradas aqui; edite o modelo na página de Agentes ou troque este colega por outro em Geral.",
     "template_unavailable": "Este modelo não está instalado nesta máquina no momento, então o colega recorre aos padrões. Instale ou restaure {{name}} para devolver todas as suas capacidades.",
     "template_authored": "Você criou este modelo, então pode editá-lo diretamente na página de Agentes.",
-    "triggers_frame": "Os gatilhos decidem quando o orquestrador escolhe este colega para uma tarefa que alguém já iniciou — trata-se de seleção, não de autoativação.",
     "schedules_heading": "Agendamentos",
     "schedules_blurb": "Ativações por relógio: este colega inicia um turno conforme um agendamento, sem ninguém presente. Diferente dos gatilhos — que são ser escolhido para a tarefa de alguém —, aqui ele age por conta própria.",
     "webhooks_frame": "Sistemas externos acordam este colega chamando-o. A criação e revogação de tokens continuam na página de Webhooks.",
@@ -19516,7 +19513,6 @@
     "memory_profile_frame": "Notas que este colega escreve sobre você e seu trabalho à medida que aprende — levadas para cada sessão. Você pode lê-las e editá-las; o colega continua atualizando-as.",
     "sections_aria": "Seções de configurações do colega",
     "builtfrom_sections_aria": "Seções de Baseado em",
-    "behavior_sections_aria": "Seções de Comportamento",
     "memory_sections_aria": "Seções de Memória",
     "state_disabled_word": "desativado",
     "switch_own_copy_title": "Sair da cópia própria deste mate?",
@@ -19543,8 +19539,12 @@
     "state_changed": "alterado",
     "state_this_mate": "este colega",
     "state_removed": "removido",
-    "driftHint": "O arquivo de agente de {{member}} foi editado fora desta página. Clique em «Revisar alteração» para ver essa edição externa junto com o seu rascunho; depois «Salvar» grava a correção ou diz por que não pode.",
+    "driftHint": "O arquivo de agente de {{member}} foi editado fora desta página. Clique em \"Revisar alteração\" para ver essa edição externa junto com o seu rascunho; depois \"Salvar\" grava a correção ou diz por que não pode.",
     "sourceFailed": "Não foi possível validar a configuração salva. Recarregue-a do servidor para tentar de novo.",
-    "runtime_failed": "Falha ao carregar o runtime. A versão salva permanece."
+    "runtime_failed": "Falha ao carregar o runtime. A versão salva permanece.",
+    "server_verb_count": "{{on}} de {{total}} aprovados automaticamente",
+    "server_allow_aria": "Permitir {{server}}",
+    "server_no_verbs": "Nenhuma ferramenta aprovada automaticamente",
+    "server_glob_covered": "Aprovado automaticamente como um todo — desligue o servidor para escolher as ferramentas uma a uma"
   }
 }

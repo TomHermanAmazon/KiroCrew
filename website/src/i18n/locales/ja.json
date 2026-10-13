@@ -9137,7 +9137,8 @@
       "tag_shared": "共有",
       "unsaved_changes": "未保存の変更",
       "webhook_unbound_short": "トークン未紐づけ",
-      "wire_what_it_works_with": "何を使うか"
+      "wire_what_it_works_with": "何を使うか",
+      "unsaved_in_pane": "未保存 — このセクションの「保存」を使ってください"
     },
     "awsConsentGate": {
       "confirm_title": "最初のリクエスト前に AWS の利用を確認",
@@ -18772,7 +18773,7 @@
     "restore_confirm": "次回の {{productName}} ゲートウェイ再起動時にこのバックアップを復元します。復元前に現在の記憶をストアの隣に保存します。",
     "tab_memories": "記憶",
     "tab_profile": "プロフィール",
-    "tab_recovery": "復旧",
+    "tab_recovery": "バックアップ",
     "advanced": "高度な記憶分析",
     "filter_all": "すべて",
     "clear_search": "検索をクリア",
@@ -18915,7 +18916,6 @@
     "editor_aria": "新規クルーメイトエディター",
     "section_general": "一般",
     "section_built_from": "ベース",
-    "section_behavior": "動作",
     "section_memory": "メモリ",
     "section_danger": "危険ゾーン",
     "tab_details": "詳細",
@@ -18923,12 +18923,10 @@
     "tab_mcp": "MCP サーバー",
     "tab_skills": "スキル",
     "tab_approvals": "承認",
-    "tab_model": "モデル",
-    "tab_triggers": "トリガー",
     "tab_schedules": "スケジュール",
     "tab_webhooks": "Webhook",
     "tab_profile": "プロフィール",
-    "tab_recovery": "復旧",
+    "tab_recovery": "バックアップ",
     "state_from_template": "テンプレートから",
     "state_added": "このクルーメイトで追加",
     "state_removed": "このクルーメイトで削除",
@@ -18946,7 +18944,6 @@
     "built_from_body": "このクルーメイトのツール、MCP サーバー、スキルはこのテンプレートに由来します。何が含まれるかは上のタブで確認してください。これらは継承されており、ここでは変更できません。テンプレートは「エージェント」ページで編集し、別のテンプレートへの切り替えは「一般」で行います。",
     "template_unavailable": "このテンプレートは現在このマシンにインストールされていないため、クルーメイトは既定値にフォールバックします。{{name}} をインストールまたは復元すると、全機能が戻ります。",
     "template_authored": "このテンプレートはあなたが作成したので、「エージェント」ページで直接編集できます。",
-    "triggers_frame": "トリガーは、誰かがすでに開始したタスクにオーケストレーターがこのクルーメイトを選ぶタイミングを決めます。自分で起動するのではなく、選ばれることに関するものです。",
     "schedules_heading": "スケジュール",
     "schedules_blurb": "時刻ベースの起動：このクルーメイトは、人がいなくてもスケジュールに従ってターンを開始します。トリガー（誰かのタスクに選ばれること）とは異なり、ここでは自分の意思で動きます。",
     "webhooks_frame": "外部システムが呼び出すことでこのクルーメイトを起動します。トークンの発行と失効は Webhook ページのままです。",
@@ -18958,7 +18955,6 @@
     "memory_profile_frame": "このクルーメイトが学習しながらあなたと自分の作業について書き留めるメモで、各セッションに引き継がれます。読んで編集できますが、クルーメイトも更新し続けます。",
     "sections_aria": "クルーメイト設定のセクション",
     "builtfrom_sections_aria": "「ベース」のセクション",
-    "behavior_sections_aria": "「動作」のセクション",
     "memory_sections_aria": "「メモリ」のセクション",
     "state_disabled_word": "無効",
     "switch_own_copy_title": "このメイト専用のコピーから切り替えますか？",
@@ -18987,6 +18983,10 @@
     "state_removed": "削除済み",
     "driftHint": "{{member}} のエージェントファイルがこのページの外で編集されました。「変更を確認」を押すと、その外部編集を自分の下書きと合わせて確認できます。その後「保存」が修正を書き込むか、できない理由を知らせます。",
     "sourceFailed": "保存された設定を検証できませんでした。サーバーから再読み込みして再試行してください。",
-    "runtime_failed": "ランタイムの読み込みに失敗しました。保存されたバージョンは残ります。"
+    "runtime_failed": "ランタイムの読み込みに失敗しました。保存されたバージョンは残ります。",
+    "server_verb_count": "{{total}} 件中 {{on}} 件を自動承認",
+    "server_allow_aria": "{{server}} を許可",
+    "server_no_verbs": "自動承認されたツールはありません",
+    "server_glob_covered": "全体として自動承認 — ツールを個別に選ぶにはサーバーをオフにしてください"
   }
 }

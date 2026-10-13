@@ -9413,7 +9413,8 @@
       "tag_shared": "Partagé",
       "unsaved_changes": "Modifications non enregistrées",
       "webhook_unbound_short": "Aucun token lié",
-      "wire_what_it_works_with": "Ce qu'il utilise"
+      "wire_what_it_works_with": "Ce qu'il utilise",
+      "unsaved_in_pane": "Non enregistré — utilisez Enregistrer dans cette section"
     },
     "awsConsentGate": {
       "confirm_title": "Confirmer l'utilisation d'AWS avant la premiere requete",
@@ -19330,7 +19331,7 @@
     "restore_confirm": "Préparez cette sauvegarde pour le prochain redémarrage de la passerelle {{productName}}. La mémoire actuelle est sauvegardée à côté du stockage avant restauration.",
     "tab_memories": "Souvenirs",
     "tab_profile": "Profil",
-    "tab_recovery": "Récupération",
+    "tab_recovery": "Sauvegardes",
     "advanced": "Analyse avancée de la mémoire",
     "filter_all": "Tous",
     "clear_search": "Effacer la recherche",
@@ -19473,7 +19474,6 @@
     "editor_aria": "Éditeur de nouveau coéquipier",
     "section_general": "Général",
     "section_built_from": "Basé sur",
-    "section_behavior": "Comportement",
     "section_memory": "Mémoire",
     "section_danger": "Zone sensible",
     "tab_details": "Détails",
@@ -19481,12 +19481,10 @@
     "tab_mcp": "Serveurs MCP",
     "tab_skills": "Compétences",
     "tab_approvals": "Approbations",
-    "tab_model": "Modèle",
-    "tab_triggers": "Déclencheurs",
     "tab_schedules": "Planifications",
     "tab_webhooks": "Webhooks",
     "tab_profile": "Profil",
-    "tab_recovery": "Récupération",
+    "tab_recovery": "Sauvegardes",
     "state_from_template": "Du modèle",
     "state_added": "Ajouté sur ce coéquipier",
     "state_removed": "Retiré sur ce coéquipier",
@@ -19504,7 +19502,6 @@
     "built_from_body": "Les outils, serveurs MCP et compétences de ce coéquipier proviennent de ce modèle — voir les onglets ci-dessus pour le détail. Ils sont hérités et ne peuvent pas être modifiés ici ; modifie le modèle sur la page Agents, ou bascule ce coéquipier vers un autre dans Général.",
     "template_unavailable": "Ce modèle n’est pas installé sur cette machine pour l’instant ; le coéquipier revient donc aux valeurs par défaut. Installe ou restaure {{name}} pour lui rendre toutes ses capacités.",
     "template_authored": "Tu as créé ce modèle, tu peux donc le modifier directement sur la page Agents.",
-    "triggers_frame": "Les déclencheurs déterminent quand l’orchestrateur choisit ce coéquipier pour une tâche déjà lancée par quelqu’un — il s’agit de sélection, pas d’auto-réveil.",
     "schedules_heading": "Planifications",
     "schedules_blurb": "Réveils horaires : ce coéquipier démarre un tour selon un calendrier, sans personne présent. Contrairement aux déclencheurs — qui consistent à être choisi pour la tâche de quelqu’un —, ici il agit de lui-même.",
     "webhooks_frame": "Les systèmes externes réveillent ce coéquipier en l’appelant. La création et la révocation des jetons restent sur la page Webhooks.",
@@ -19516,11 +19513,10 @@
     "memory_profile_frame": "Notes que ce coéquipier écrit à ton sujet et sur son travail au fil de son apprentissage — reprises à chaque session. Tu peux les lire et les modifier ; le coéquipier continue de les mettre à jour.",
     "sections_aria": "Sections des réglages du coéquipier",
     "builtfrom_sections_aria": "Sections Basé sur",
-    "behavior_sections_aria": "Sections Comportement",
     "memory_sections_aria": "Sections Mémoire",
     "state_disabled_word": "désactivé",
-    "switch_own_copy_title": "Quitter la copie propre de ce mate ?",
-    "switch_own_copy_body": "Ce mate est fondé sur sa propre copie personnalisée. Passer à un autre modèle supprime cette copie : elle ne pourra plus être sélectionnée."
+    "switch_own_copy_title": "Quitter la copie propre de ce mate ?",
+    "switch_own_copy_body": "Ce mate est fondé sur sa propre copie personnalisée. Passer à un autre modèle supprime cette copie  : elle ne pourra plus être sélectionnée."
   },
   "crewApprovalsEditor": {
     "loading": "Chargement des approbations…",
@@ -19543,8 +19539,12 @@
     "state_changed": "modifié",
     "state_this_mate": "ce coéquipier",
     "state_removed": "retiré",
-    "driftHint": "Le fichier d'agent de {{member}} a été modifié en dehors de cette page. Cliquez sur « Examiner la modification » pour voir cette modification externe avec votre propre brouillon ; « Enregistrer » applique alors le correctif ou explique pourquoi il ne le peut pas.",
-    "sourceFailed": "Impossible de valider la configuration enregistrée. Rechargez-la depuis le serveur pour réessayer.",
-    "runtime_failed": "Échec du chargement de l'exécution. La version enregistrée est conservée."
+    "driftHint": "Le fichier d’agent de {{member}} a été modifié en dehors de cette page. Clique sur « Examiner la modification » pour voir cette modification externe avec ton propre brouillon ; « Enregistrer » applique alors le correctif ou explique pourquoi il ne le peut pas.",
+    "sourceFailed": "Impossible de valider la configuration enregistrée. Recharge-la depuis le serveur pour réessayer.",
+    "runtime_failed": "Échec du chargement de l'exécution. La version enregistrée est conservée.",
+    "server_verb_count": "{{on}} sur {{total}} approuvés automatiquement",
+    "server_allow_aria": "Autoriser {{server}}",
+    "server_no_verbs": "Aucun outil approuvé automatiquement",
+    "server_glob_covered": "Approuvé automatiquement dans son ensemble — désactivez le serveur pour choisir les outils un par un"
   }
 }

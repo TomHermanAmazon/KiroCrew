@@ -9413,7 +9413,8 @@
       "tag_shared": "Compartido",
       "unsaved_changes": "Cambios sin guardar",
       "webhook_unbound_short": "Sin tokens vinculados",
-      "wire_what_it_works_with": "Con qué trabaja"
+      "wire_what_it_works_with": "Con qué trabaja",
+      "unsaved_in_pane": "Sin guardar — usa Guardar en esta sección"
     },
     "awsConsentGate": {
       "confirm_title": "Confirma el uso de AWS antes de la primera solicitud",
@@ -19330,7 +19331,7 @@
     "restore_confirm": "Prepara esta copia para el próximo reinicio de la puerta de enlace de {{productName}}. La memoria actual se guarda junto al almacén antes de restaurarla.",
     "tab_memories": "Recuerdos",
     "tab_profile": "Perfil",
-    "tab_recovery": "Recuperación",
+    "tab_recovery": "Copias de seguridad",
     "advanced": "Análisis avanzado de memoria",
     "filter_all": "Todos",
     "clear_search": "Borrar búsqueda",
@@ -19473,7 +19474,6 @@
     "editor_aria": "Editor de nuevo compañero",
     "section_general": "General",
     "section_built_from": "Basado en",
-    "section_behavior": "Comportamiento",
     "section_memory": "Memoria",
     "section_danger": "Zona de peligro",
     "tab_details": "Detalles",
@@ -19481,12 +19481,10 @@
     "tab_mcp": "Servidores MCP",
     "tab_skills": "Habilidades",
     "tab_approvals": "Aprobaciones",
-    "tab_model": "Modelo",
-    "tab_triggers": "Disparadores",
     "tab_schedules": "Programaciones",
     "tab_webhooks": "Webhooks",
     "tab_profile": "Perfil",
-    "tab_recovery": "Recuperación",
+    "tab_recovery": "Copias de seguridad",
     "state_from_template": "De la plantilla",
     "state_added": "Añadido en este compañero",
     "state_removed": "Eliminado en este compañero",
@@ -19504,7 +19502,6 @@
     "built_from_body": "Las herramientas, los servidores MCP y las habilidades de este compañero provienen de esta plantilla; consulta las pestañas de arriba para ver exactamente qué incluye. Son heredadas y no se pueden cambiar aquí; edita la plantilla en la página de Agentes o cambia este compañero a otra en General.",
     "template_unavailable": "Esta plantilla no está instalada en esta máquina ahora mismo, así que el compañero recurre a los valores predeterminados. Instala o restaura {{name}} para devolverle todas sus capacidades.",
     "template_authored": "Tú creaste esta plantilla, así que puedes editarla directamente en la página de Agentes.",
-    "triggers_frame": "Los disparadores deciden cuándo el orquestador elige a este compañero para una tarea que alguien ya inició: es selección, no autoactivación.",
     "schedules_heading": "Programaciones",
     "schedules_blurb": "Activaciones por reloj: este compañero inicia un turno según un horario, sin que haya nadie presente. A diferencia de los disparadores —que son ser elegido para la tarea de alguien—, aquí actúa por su cuenta.",
     "webhooks_frame": "Los sistemas externos activan a este compañero llamándolo. La creación y revocación de tokens sigue en la página de Webhooks.",
@@ -19516,7 +19513,6 @@
     "memory_profile_frame": "Notas que este compañero escribe sobre ti y su trabajo a medida que aprende, y que lleva a cada sesión. Puedes leerlas y editarlas; el compañero las sigue actualizando.",
     "sections_aria": "Secciones de ajustes del compañero",
     "builtfrom_sections_aria": "Secciones de Basado en",
-    "behavior_sections_aria": "Secciones de Comportamiento",
     "memory_sections_aria": "Secciones de Memoria",
     "state_disabled_word": "desactivado",
     "switch_own_copy_title": "¿Cambiar de la copia propia de este mate?",
@@ -19545,6 +19541,10 @@
     "state_removed": "eliminado",
     "driftHint": "El archivo de agente de {{member}} se editó fuera de esta página. Pulsa «Revisar cambio» para ver esa edición externa junto con tu propio borrador; luego «Guardar» aplica la corrección o indica por qué no puede.",
     "sourceFailed": "No se pudo validar la configuración guardada. Vuelve a cargarla desde el servidor para reintentar.",
-    "runtime_failed": "Error al cargar el entorno de ejecución. La versión guardada permanece."
+    "runtime_failed": "Error al cargar el entorno de ejecución. La versión guardada permanece.",
+    "server_verb_count": "{{on}} de {{total}} aprobados automáticamente",
+    "server_allow_aria": "Permitir {{server}}",
+    "server_no_verbs": "No hay herramientas aprobadas automáticamente",
+    "server_glob_covered": "Aprobado automáticamente en bloque: desactiva el servidor para elegir las herramientas una por una"
   }
 }
