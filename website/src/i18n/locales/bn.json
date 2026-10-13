@@ -431,7 +431,8 @@
       "session_ready_type_a_message_to_start": "সেশন প্রস্তুত। শুরু করতে একটি মেসেজ লিখুন।",
       "streaming": "স্ট্রিমিং হচ্ছে",
       "attachments_not_allowed": "এই অ্যাপ ফাইল গ্রহণ করে না। এর বদলে {{page}}-এ সংযুক্ত করো।",
-      "uploading_files": "ফাইল আপলোড হচ্ছে…"
+      "uploading_files": "ফাইল আপলোড হচ্ছে…",
+      "untitled_session_title": "নতুন সেশন"
     },
     "chatMessageList": {
       "copied": "কপি হয়েছে!",

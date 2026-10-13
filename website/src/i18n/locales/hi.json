@@ -431,7 +431,8 @@
       "session_ready_type_a_message_to_start": "सत्र तैयार है। शुरू करने के लिए संदेश टाइप करें।",
       "streaming": "स्ट्रीमिंग",
       "attachments_not_allowed": "यह ऐप फ़ाइलें स्वीकार नहीं करता। इसके बजाय उन्हें {{page}} में संलग्न करें।",
-      "uploading_files": "फ़ाइलें अपलोड हो रही हैं…"
+      "uploading_files": "फ़ाइलें अपलोड हो रही हैं…",
+      "untitled_session_title": "नया सेशन"
     },
     "chatMessageList": {
       "copied": "कॉपी किया गया!",

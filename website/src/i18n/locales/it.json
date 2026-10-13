@@ -445,7 +445,8 @@
       "session_ready_type_a_message_to_start": "Sessione pronta. Digita un messaggio per iniziare.",
       "streaming": "streaming",
       "attachments_not_allowed": "Questa app non accetta file. Allegali invece in «{{page}}».",
-      "uploading_files": "Caricamento dei file…"
+      "uploading_files": "Caricamento dei file…",
+      "untitled_session_title": "Nuova sessione"
     },
     "chatMessageList": {
       "copied": "Copiato!",

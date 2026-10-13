@@ -417,7 +417,8 @@
       "session_ready_type_a_message_to_start": "会话已就绪。输入消息即可开始。",
       "streaming": "流式输出中",
       "attachments_not_allowed": "此应用不接受文件。请改在“{{page}}”中附加。",
-      "uploading_files": "正在上传文件…"
+      "uploading_files": "正在上传文件…",
+      "untitled_session_title": "新会话"
     },
     "chatMessageList": {
       "copied": "已复制！",

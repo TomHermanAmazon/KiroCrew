@@ -459,7 +459,8 @@
       "session_ready_type_a_message_to_start": "Сессия готова. Введите сообщение, чтобы начать.",
       "streaming": "потоковая передача",
       "attachments_not_allowed": "Это приложение не принимает файлы. Прикрепи их в разделе «{{page}}».",
-      "uploading_files": "Загрузка файлов…"
+      "uploading_files": "Загрузка файлов…",
+      "untitled_session_title": "Новый сеанс"
     },
     "chatMessageList": {
       "copied": "Скопировано!",

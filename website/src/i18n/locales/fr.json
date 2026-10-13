@@ -445,7 +445,8 @@
       "session_ready_type_a_message_to_start": "Session prête. Saisissez un message pour commencer.",
       "streaming": "diffusion en cours",
       "attachments_not_allowed": "Cette app n'accepte pas de fichiers. Joins-les plutôt dans « {{page}} ».",
-      "uploading_files": "Envoi des fichiers…"
+      "uploading_files": "Envoi des fichiers…",
+      "untitled_session_title": "Nouvelle session"
     },
     "chatMessageList": {
       "copied": "Copié !",
