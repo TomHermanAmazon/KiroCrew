@@ -35,12 +35,8 @@ from dataclasses import replace as dataclasses_replace  # noqa: F401 - owners re
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
-# The owners the hook subsystem's rules live in, and the names they define. Every
-# one is re-exported here unchanged: ``kiro_crew.hooks`` is the import path and the
-# patch surface for all of them, and ``compose`` at the foot of this module runs each
-# of their functions on these globals. See :mod:`kiro_crew.hook_runtime`.
-from kiro_crew import hook_runtime as _hook_runtime
 from kiro_crew import jsonl_util, pinned_fs, platform_compat, security, webhooks  # noqa: F401
+from kiro_crew._facade_compose import compose as _facade_compose
 
 # The xattr ACL-carry policy is shared with atomic_write.atomic_write: both
 # install a fresh inode and must reproduce the source's access controls or
@@ -58,6 +54,11 @@ from kiro_crew.config import paths as _config_paths
 # one copy, owned with the other config field coercers. Re-exported here because
 # ``dashboard/handlers/security.py`` imports it from this module.
 from kiro_crew.config.fields import _coerce_bool  # noqa: F401
+
+# The owners the hook subsystem's rules live in, and the names they define. Every
+# one is re-exported here unchanged: ``kiro_crew.hooks`` is the import path and the
+# patch surface for all of them, and ``compose`` at the foot of this module runs each
+# of their functions on these globals. See :mod:`kiro_crew.hook_runtime`.
 from kiro_crew.hook_runtime import denied_commands as _owner_denied_commands
 from kiro_crew.hook_runtime import descriptor_identity as _owner_descriptor_identity
 from kiro_crew.hook_runtime import gate_tiers as _owner_gate_tiers
@@ -2793,7 +2794,7 @@ _global_script_hook_store: ScriptHookStore | None = None
 # including the two UNC root memos primed above, which stay here because a priming
 # call to an owner function would run before this line and write its memo into the
 # owner's namespace.
-_hook_runtime.compose(
+_facade_compose(
     globals(),
     (
         _owner_denied_commands,
