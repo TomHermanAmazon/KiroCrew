@@ -535,6 +535,14 @@ _REDACTION_SINKS: tuple[tuple[str, str, str], ...] = (
         "shown as typed like an ordinary send's row.",
     ),
     (
+        "Queued-message drop notice",
+        "dashboard/session_control_parts/delivery_containment.py",
+        "The excerpt of a queued message a drain dropped, posted back to the channel "
+        "it was addressed from (`notify_channel_recipient_dropped`): conversation "
+        "text leaving for an external channel, scanned for credentials and "
+        "exfiltration URLs on the way out.",
+    ),
+    (
         "Session control read",
         "dashboard/session_control.py",
         "Another session's transcript tail and its cached intent summary, served by "
@@ -2212,6 +2220,16 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         "dashboard/chat_turn/tool_rows.py",
         "dashboard/chat_turn/turn_spec_hooks.py",
         "dashboard/chat_turn/turn_stats.py",
+        # Owners composed into dashboard/session_control.py, their redactor calls
+        # moved verbatim out of the module the "Session control read" sink names.
+        # The refusal factory scrubs the target and reason it writes to the audit
+        # record; the model switch and the create verb refuse a model name their
+        # redaction would change; and the model a pending pick reports, and the
+        # inherited model a create reply says it dropped, are redacted before they
+        # go back to the calling agent. None is a transcript or file output path.
+        "dashboard/session_control_parts/target_authorization.py",
+        "dashboard/session_control_parts/model_switch.py",
+        "dashboard/session_control_parts/session_create.py",
         "dashboard/chat_nav.py",
         "dashboard/chat_persistence.py",
         # The row projection and the restore-time title check, composed into that
