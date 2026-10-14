@@ -12247,7 +12247,14 @@
       "dismiss_until_next_visit": "Bis zum nächsten Besuch ausblenden",
       "could_not_check_restored_tabs": "Es konnte nicht geprüft werden, ob nach dem letzten Neustart alle Tabs wiederhergestellt wurden.",
       "could_not_start_fresh_session": "Neue Sitzung konnte nicht gestartet werden",
-      "delivery_unconfirmed_option": "Zustellung nicht bestätigt — prüfe den Verlauf und tippe den Vorschlag erneut an, falls er fehlt."
+      "delivery_unconfirmed_option": "Zustellung nicht bestätigt — prüfe den Verlauf und tippe den Vorschlag erneut an, falls er fehlt.",
+      "delivery_unconfirmed_comments": "Zustellung nicht bestätigt — sende deine Kommentare aus dem Dokument erneut, wenn sie nicht innerhalb einer Minute in dieser Unterhaltung stehen. Wenn du früher erneut sendest, könnten sie doppelt ankommen.",
+      "delivery_unconfirmed_comments_overlay": "Zustellung nicht bestätigt — öffne das Seitenpanel erneut und sende deine Kommentare noch einmal, wenn sie nicht innerhalb einer Minute in dieser Unterhaltung stehen. Wenn du früher erneut sendest, könnten sie doppelt ankommen.",
+      "comments_sent_one": "{{count}} Kommentar gesendet",
+      "comments_refused": "{{name}} hat diese Kommentare nicht erhalten — sende sie aus dem Dokument erneut. Die Kommentare sind noch dort.",
+      "comments_refused_overlay": "{{name}} hat diese Kommentare nicht erhalten — öffne das Seitenpanel erneut und sende sie noch einmal. Die Kommentare sind noch im Dokument.",
+      "comments_sent_other": "{{count}} Kommentare gesendet",
+      "your_crewmate": "Dein Crewmate"
     },
     "chatSidebar": {
       "1_skipped_currently_selected": "(1 übersprungen — aktuell ausgewählt)",

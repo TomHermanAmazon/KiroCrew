@@ -558,8 +558,8 @@ export function MembersPageThreadColumn({
   } = thread
   const {
     openMemberSideChat, openCrewWorkLog, sessionRoster, retryThreadsFlag, threadsFlagFailed,
-    threadsFlagRetrying, threadsOn, threadsQuery, threadHooks, actionError, setActionError, openFileGuarded,
-    openSessionGuarded,
+    threadsFlagRetrying, threadsOn, threadsQuery, threadHooks, actionError, setActionError, actionInfo,
+    openFileGuarded, openSessionGuarded,
   } = sidePanel
   const {
     headerInset, betweenHeaderH, betweenHeaderRef, dismissMateGreeting, mateGreeting, mateGreetingFailure,
@@ -835,6 +835,16 @@ export function MembersPageThreadColumn({
                     onDismiss={() => setActionError('')}
                     testId="member-panel-action-error"
                   />
+                )}
+                {actionInfo && (
+                  <p
+                    className="text-[13px] text-muted px-4 py-1.5"
+                    data-testid="member-panel-action-info"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {actionInfo}
+                  </p>
                 )}
                 {/* The editor's roster read (crewAgentsQuery, enabled only once the
                     identity pill sets editingCrew) failed: without this the pill would

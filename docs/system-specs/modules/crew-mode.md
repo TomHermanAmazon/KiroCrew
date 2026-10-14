@@ -2824,6 +2824,41 @@ nowhere at all when the shell swallows the popup. The split-view pane still pass
 for the reason #3300 records (its dock is `activeSlot`-keyed while pane focus
 is not).
 
+**A document in the member's side panel takes inline comments.** The side
+panel owner (`useMembersPageSidePanel`) hands the panel `onSubmitComments` and
+`connected`, as the chat page does, so a markdown file tab offers the selection
+comment composer and the comment list, and an artifact tab its submit-to-chat
+bar (#20081). The send lives in `useMemberDocumentComments`
+(`website/src/hooks/`): Submit sends the batch the panel formats into the DM
+through the chat-core transport (`sendTurn`), carrying the composer's busy-send
+decision for that slot (`slotBusySteer`).
+The target is `confirmedSlot`, read at the press: the slot the document
+actions stamp every tab with, on a strip bucketed per member, so a batch
+reaches only the crewmate the panel belongs to. While the thread is
+unconfirmed the panel withholds its document tabs with the other slot-bound
+views, so Submit is not on screen, and `submitComments` sends nothing without
+a confirmed slot. The page draws no optimistic row for the batch. Every
+outcome shows feedback outside the DM transcript -- the crewmate's DM stays
+messages-only per `docs/decisions/2026-10-09-crewmate-chat-draws-messages-only.md`.
+A failure goes through `showActionError` (an ErrorNotice banner above the
+thread; in overlay placement it also closes the overlay, which would otherwise
+cover the notice) and leaves the comments pending. `refused` names the
+crewmate, says the comments are still in the document and to send them again
+(the server's reason is logged, never surfaced). `response-late` and
+`transport-error` both show a delivery-unconfirmed notice that gives the rule
+for the retry: send the comments again if they are not in the conversation
+within a minute, because sending again sooner repeats comments that did arrive
+(a minute is the bound the chat page gives for an unconfirmed message). Each
+notice has two variants, picked by where the page placed the panel. Beside the
+thread they say to send the comments again from the document, which is already
+on screen. In overlay placement the failure has just closed the panel, so they
+say to reopen the side panel and send them again. No variant names a button,
+since the retry control is Submit All on a file tab and Submit on an artifact
+tab. A delivered outcome sets the hook's status line (neutral text, drawn by
+the thread column with `role=status`, auto-dismisses after 5 s), clears the
+comments and clears any earlier failure notice. `dispatched`, `queued` and `unknown` (a 2xx whose body
+could not be read, so the server took the request) all show "N comments sent".
+
 ## Selection: the `select_crew` contract
 
 Discovery importing a provider template as a configured member does not rebind

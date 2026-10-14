@@ -12429,7 +12429,15 @@
       "dismiss_until_next_visit": "Masquer jusqu’à la prochaine visite",
       "could_not_check_restored_tabs": "Impossible de vérifier si tous les onglets ont été restaurés après le dernier redémarrage.",
       "could_not_start_fresh_session": "Impossible de démarrer une nouvelle session",
-      "delivery_unconfirmed_option": "Envoi non confirmé — vérifie la conversation, puis appuie de nouveau sur la suggestion si elle n'y figure pas."
+      "delivery_unconfirmed_option": "Envoi non confirmé — vérifie la conversation, puis appuie de nouveau sur la suggestion si elle n'y figure pas.",
+      "delivery_unconfirmed_comments": "Livraison non confirmée — envoie de nouveau tes commentaires depuis le document s’ils ne sont pas dans cette conversation d’ici une minute. Les renvoyer plus tôt pourrait les dupliquer.",
+      "delivery_unconfirmed_comments_overlay": "Livraison non confirmée — rouvre le panneau latéral et envoie de nouveau tes commentaires s’ils ne sont pas dans cette conversation d’ici une minute. Les renvoyer plus tôt pourrait les dupliquer.",
+      "comments_sent_one": "{{count}} commentaire envoyé",
+      "comments_refused": "{{name}} n’a pas reçu ces commentaires — envoie-les de nouveau depuis le document. Ils y sont toujours.",
+      "comments_refused_overlay": "{{name}} n’a pas reçu ces commentaires — rouvre le panneau latéral et envoie-les de nouveau. Ils sont toujours dans le document.",
+      "comments_sent_other": "{{count}} commentaires envoyés",
+      "comments_sent_many": "{{count}} commentaires envoyés",
+      "your_crewmate": "Ton crewmate"
     },
     "chatSidebar": {
       "1_skipped_currently_selected": "(1 ignorée — actuellement sélectionnée)",

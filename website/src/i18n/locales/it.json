@@ -12429,7 +12429,15 @@
       "dismiss_until_next_visit": "Nascondi fino alla prossima visita",
       "could_not_check_restored_tabs": "Non è stato possibile verificare se tutte le schede sono state ripristinate dopo l'ultimo riavvio.",
       "could_not_start_fresh_session": "Impossibile avviare una nuova sessione",
-      "delivery_unconfirmed_option": "Consegna non confermata: controlla la conversazione e, se manca, tocca di nuovo il suggerimento."
+      "delivery_unconfirmed_option": "Consegna non confermata: controlla la conversazione e, se manca, tocca di nuovo il suggerimento.",
+      "delivery_unconfirmed_comments": "Consegna non confermata — invia di nuovo i tuoi commenti dal documento se non compaiono in questa conversazione entro un minuto. Inviarli prima potrebbe duplicarli.",
+      "delivery_unconfirmed_comments_overlay": "Consegna non confermata — riapri il pannello laterale e invia di nuovo i tuoi commenti se non compaiono in questa conversazione entro un minuto. Inviarli prima potrebbe duplicarli.",
+      "comments_sent_one": "{{count}} commento inviato",
+      "comments_refused": "{{name}} non ha ricevuto questi commenti — inviali di nuovo dal documento. Sono ancora lì.",
+      "comments_refused_overlay": "{{name}} non ha ricevuto questi commenti — riapri il pannello laterale e inviali di nuovo. Sono ancora nel documento.",
+      "comments_sent_other": "{{count}} commenti inviati",
+      "comments_sent_many": "{{count}} commenti inviati",
+      "your_crewmate": "Il tuo crewmate"
     },
     "chatSidebar": {
       "1_skipped_currently_selected": "(1 saltata — attualmente selezionata)",

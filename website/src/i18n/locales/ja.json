@@ -12065,7 +12065,13 @@
       "dismiss_until_next_visit": "次回アクセスまで非表示にする",
       "could_not_check_restored_tabs": "前回の再起動後にすべてのタブが復元されたかを確認できませんでした。",
       "could_not_start_fresh_session": "新しいセッションを開始できませんでした",
-      "delivery_unconfirmed_option": "送信が確認できません — 会話履歴を確認し、見当たらなければ提案をもう一度タップしてください。"
+      "delivery_unconfirmed_option": "送信が確認できません — 会話履歴を確認し、見当たらなければ提案をもう一度タップしてください。",
+      "delivery_unconfirmed_comments": "配信が確認されていません—1分以内にこの会話にコメントが表示されない場合は、ドキュメントからもう一度送信してください。それより早く再送すると重複する可能性があります。",
+      "delivery_unconfirmed_comments_overlay": "配信が確認されていません—1分以内にこの会話にコメントが表示されない場合は、サイドパネルを開き直して、もう一度送信してください。それより早く再送すると重複する可能性があります。",
+      "comments_refused": "{{name}}はこれらのコメントを受け取れませんでした—ドキュメントからもう一度送信してください。コメントはそこに残っています。",
+      "comments_refused_overlay": "{{name}}はこれらのコメントを受け取れませんでした—サイドパネルを開き直して、もう一度送信してください。コメントはドキュメントに残っています。",
+      "comments_sent_other": "{{count}}件のコメントを送信しました",
+      "your_crewmate": "クルーメート"
     },
     "chatSidebar": {
       "1_skipped_currently_selected": "(1 件を除外 — 現在選択中)",

@@ -40,6 +40,7 @@ import { useRailWidth } from '../../hooks/useRailWidth'
 import { useAnyLiveAppTab, usePanelTabs, type ViewKind } from '../../hooks/usePanelTabs'
 import { usePanelTabDescriptors } from '../../hooks/panelTabRegistry'
 import { usePanelDocumentActions } from '../../hooks/usePanelDocumentActions'
+import { useMemberDocumentComments } from '../../hooks/useMemberDocumentComments'
 import { useRunInTerminalBridge, useRunInTerminalRefs } from '../../hooks/useRunInTerminalBridge'
 import { lastActivityEpoch } from '../chat/sessionOrder'
 import { type ChatSlot } from '../../types'
@@ -59,6 +60,7 @@ interface MembersPageSidePanelStateOptions {
   layout: MembersPageLayout
   profileCard: MembersPageProfileState
   drawers: MembersPageDrawers
+  rosterView: MembersPageRosterView
   thread: MembersPageThreadState
   navigate: NavigateFunction
   location: Location
@@ -76,13 +78,14 @@ interface MembersPageSidePanelStateOptions {
 
 /** The side panel's binding to the confirmed slot, and the Profile tab state declared beside it. */
 export function useMembersPageSidePanel({
-  layout, profileCard, drawers, thread, navigate, location, queryClient, activeName, searchParams,
+  layout, profileCard, drawers, rosterView, thread, navigate, location, queryClient, activeName, searchParams,
   setSearchParams, profile, setProfile, liveSlots, slotsLoaded, active, activeMemberName,
 }: MembersPageSidePanelStateOptions) {
   const { isMobile, winW, beside, setOverlayOpen, setDockedOpen, panelVisible } = layout
   const { openProfile, schedGuardRef, schedAtStakeRef } = profileCard
   const { sidePanelPhase } = drawers
-  const { activeSlot, confirmedSlot } = thread
+  const { crewmateLabel } = rosterView
+  const { activeSlot, confirmedSlot, connected } = thread
   // Crewmate-panel IA: the right column rests at 60% of the content row (the
   // window minus the live nav rail), clamped so the thread keeps its minimum.
   // The same number sizes the docked profile card, so card and panel swap in
@@ -345,10 +348,10 @@ export function useMembersPageSidePanel({
   const besideRef = useRef(beside)
   besideRef.current = beside
   const [actionError, setActionError] = useState('')
-  // A failed document read is reported above the thread. In overlay mode the
-  // open panel covers exactly that spot — the click that failed happened inside
-  // it — so the overlay closes as the notice appears; otherwise the failure is
-  // silent to the person who caused it.
+  // A failed document read or comment send is reported above the thread. In
+  // overlay mode the open panel covers exactly that spot — the click that
+  // failed happened inside it — so the overlay closes as the notice appears;
+  // otherwise the failure is silent to the person who caused it.
   const showActionError = useCallback((message: string) => {
     setActionError(message)
     if (!besideRef.current) setOverlayOpen(false)
@@ -363,6 +366,13 @@ export function useMembersPageSidePanel({
     queryClient,
     showActionError,
     onOpened: revealPanelAfterOpen,
+  })
+  // Inline comments on a document in the side panel: the hook owns the send and
+  // the "N comments sent" line; this owner supplies the confirmed DM slot, the
+  // panel placement and the failure notice.
+  const clearActionError = useCallback(() => setActionError(''), [])
+  const { info: actionInfo, submitComments } = useMemberDocumentComments({
+    connected, slotRef: activeSlotRef, besideRef, crewmateLabel, showActionError, clearActionError,
   })
   // "Run in terminal" from a crewmate chat's code blocks. Without a host here
   // the request had no receiver and the button timed out. The shell starts in
@@ -462,8 +472,8 @@ export function useMembersPageSidePanel({
     openCrewWorkLog, openCrewView, sessionRoster, retryThreadsFlag, threadsFlagFailed, threadsFlagRetrying,
     threadsOn, openThreadMid, threadsQuery, closeReplyThread, threadHooks, setShownTabId, schedAtStake,
     setSchedAtStake, schedReleased, schedulesMountedRef, dashboardVisitedFor, closeOverlay, sidePanelOnScreen,
-    sidePanelHiddenNow, actionError, setActionError, showActionError, revealPanelAfterOpen, openArtifact,
-    openFile, openWorkingTreeDiff, saveFile, runInTerminalScope, openFileGuarded, openArtifactGuarded,
+    sidePanelHiddenNow, actionError, setActionError, actionInfo, showActionError, revealPanelAfterOpen, openArtifact,
+    openFile, openWorkingTreeDiff, saveFile, submitComments, runInTerminalScope, openFileGuarded, openArtifactGuarded,
     openSessionGuarded, drivingSessions, setDrivingExpandedFor, drivingExpanded, visibleDriving,
     dashboardPreviewLink, focusPanelTab, leaveDashboardPreview, requestCloseOverlay,
   }
@@ -496,11 +506,12 @@ export function MembersPageSidePanel({
   const { openProfile, schedGuardRef, schedAtStakeRef, closeDocked } = profileCard
   const { sidePanelX, sidePanelSlideRef } = drawers
   const { activeView, crewmateLabel } = rosterView
-  const { activeSlot, activeThreadFailed, confirmedSlot } = thread
+  const { activeSlot, activeThreadFailed, confirmedSlot, connected } = thread
   const {
     panelDefaultW, activeMemberKey, tabsCtl, projectDir, hiddenViews, threadsOn, openThreadMid,
     closeReplyThread, setShownTabId, dashboardVisitedFor, closeOverlay, sidePanelOnScreen, sidePanelHiddenNow,
-    openFile, openWorkingTreeDiff, saveFile, dashboardPreviewLink, leaveDashboardPreview, requestCloseOverlay,
+    openFile, openWorkingTreeDiff, saveFile, submitComments, dashboardPreviewLink, leaveDashboardPreview,
+    requestCloseOverlay,
   } = sidePanel
   const { reduceMotion } = profileFlight
   const { openArtifactInPanel } = navigation
@@ -592,6 +603,11 @@ export function MembersPageSidePanel({
     onOpenWorkingTreeDiff: openWorkingTreeDiff,
     onArtifactOpen: openArtifactInPanel,
     onFileSave: saveFile,
+    // Document tabs take inline comments here as on the chat page; their
+    // Submit lands in this crewmate's chat (`submitComments`) and is
+    // disabled while the gateway is offline.
+    onSubmitComments: submitComments,
+    connected,
     leadingTabs,
     slotTitle: crewDisplayName(activeView ?? active),
     canDockBottom: false,

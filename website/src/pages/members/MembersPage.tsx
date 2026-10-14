@@ -545,7 +545,7 @@ export default function MembersPage() {
   })
   const { freshStartConfirmDialog } = thread
   const sidePanel = useMembersPageSidePanel({
-    layout, profileCard, drawers, thread, navigate, location, queryClient, activeName, searchParams,
+    layout, profileCard, drawers, rosterView, thread, navigate, location, queryClient, activeName, searchParams,
     setSearchParams, profile, setProfile, liveSlots, slotsLoaded, active, activeMemberName,
   })
   const { schedAtStake, schedulesMountedRef, runInTerminalScope } = sidePanel
