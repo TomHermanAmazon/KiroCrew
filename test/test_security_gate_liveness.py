@@ -323,7 +323,55 @@ def _url_payload_command(n: int) -> str:
 #: start with a literal ``re`` searches at memchr speed, which takes a second
 #: Authorization half and the comments that say why each spelling accepts
 #: exactly what the old one did. No credential branch, gate verdict or pass moved.
-_PACKAGE_LINE_BUDGET = 29_205
+#:
+#: Raised again, from 29,205, for ``rm_floor``: the argv floor that reads a
+#: recursive-force ``rm`` in any flag or home spelling against the root or home dir
+#: itself, with a word split on the shared quote state machine that drops comments,
+#: heredoc bodies and redirections, per-occurrence reachability that skips printed,
+#: single-quoted, commented and quoted-heredoc substitutions,
+#: and its gated branch at the end of ``is_denied``. No pattern moved.
+#:
+#: Raised again, from 29,595, for the arithmetic-paren stack in ``rm_floor._scan``:
+#: a ``<<`` inside ``((``/``$((`` is a shift, while a heredoc inside ``$(`` or a
+#: subshell is still read as data. No pattern moved.
+#:
+#: Raised again, from 29,601, for ``rm_floor._Scan.quote_breaks``: where each quote
+#: opens or closes inside a word, so ``"$HO""ME"`` and ``$HO''ME`` are the variable
+#: ``HO`` plus literal text, not ``$HOME``. No pattern moved.
+#:
+#: Raised again, from 29,608, for three ``rm_floor`` reads: only the name in
+#: ``${HOME:-"x"}`` must be one quoting run; each heredoc body expands by its own
+#: tag, and any quote in the tag (``E''OF``) keeps it literal; ``| sh`` covers
+#: only its own pipeline (``_pipeline_disqualified``), judging a grouped frame
+#: whole. Then by 1 more: an empty quoted word (``''``) never ends an ``rm`` command.
+#: Then by 3 more: ``_live_substitution_bodies`` locates each distinct non-empty
+#: body once, so a flood of empty substitutions costs no scan. Then by 19 more for
+#: four quote and redirect reads: a quoted ``;`` in printed text starts no command
+#: (``_unquoted_ops``), a quote in the tilde prefix keeps ``~`` literal, bodies come
+#: from the decoded text the live offsets index, and the last redirection in a word
+#: takes the next word. Then by 42 more for math and sibling reads: ``_Scan.arith_words``
+#: marks the words of a real ``((…))`` (inner ``(`` closing last, as bash decides) so
+#: they are never a program nor an argv end, ``_is_math`` / ``_math_bodies`` keep only
+#: the substitutions inside a ``$((…))``, and ``${HOME}.`` is a sibling, not home.
+#: Then by 9 more, net of a shorter module docstring: payloads and substitution bodies
+#: stay verbatim shell source (only ``env -S`` / ``sed …e`` strings are also read
+#: printf-decoded), and ``\$`` / ``\``` in an unquoted heredoc body open nothing.
+#: Then by 9 more to fail closed: a floor error (or ``_math_bodies`` past
+#: ``_MAX_MATH_DEPTH``) refuses under every enabled rm row and logs, never allows.
+#: Then by 35 more for the program position: leading redirections and assignments
+#: (``2>/dev/null rm``) pass it on, a case-arm ``x)`` (``_Scan.command_closes``)
+#: starts a command, and ``"\/"`` keeps its backslash in double quotes. Then by 81
+#: more: ``_shell_words`` reads a ``$(…)`` / ``<(…)`` span and the words glued to it
+#: as one argument of the command around it, and ``_group_depths`` cuts a pipeline
+#: only outside any ``{ }`` / ``( )`` / loop / ``if`` group. Then by 30 more for
+#: word reads: a backtick substitution (the shared ``_backtick_closer``) and a ``${…}`` / ``$[…]``
+#: expansion (``_opens_expansion``) are each one word, a comment runs to its newline
+#: whatever quotes it holds, and a quoted ``'|'`` is masked before the pipe check.
+#: Then by 32 more: ``_expansion_end`` matches a ``${HOME:-…}`` default's own braces,
+#: substitution bodies start only at live openers, and a heredoc delimiter's
+#: ``$(`` is not live.
+#: No pattern moved.
+_PACKAGE_LINE_BUDGET = 29_915
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
