@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import difflib  # noqa: F401
 import functools  # noqa: F401
 import hashlib
 import inspect
@@ -196,9 +197,13 @@ from kiro_crew.dashboard.chat_turn.file_changes import (  # noqa: F401
     _MAX_RECONSTRUCT_BYTES,
     _PATH_TRUNCATION_MARKER,
     _apply_turn_snapshot_budget,
+    _budgeted_opcodes,
     _classify_str_replace_before,
+    _disk_digest,
     _excerpt_pair,
+    _failed_write_entries,
     _flush_file_changes,
+    _forget_entries,
     _line_change_input,
     _note_reply_row,
     _pending_str_replace_payload,
@@ -207,6 +212,7 @@ from kiro_crew.dashboard.chat_turn.file_changes import (  # noqa: F401
     _resolve_pending_str_replace,
     _safe_read_file_text,
     _safe_read_snapshot,
+    _settle_failed_write,
     _Snapshot,
     _snapshot_write_target,
     _truncate_snapshot,
@@ -11294,6 +11300,21 @@ async def _run_chat(
                         result_digest=event.tool_output_digest,
                         result_bytes=event.tool_output_bytes,
                     )
+                    # A write that did not change its file must not show an edit
+                    # (_failed_write_entries). Only an id that still names one
+                    # call may drop: a collapsed id would also match another
+                    # call's successful write. The re-read is offloaded.
+                    if _tool_status in ("failed", "refused") and _tcid_identifies:
+                        _not_written = _failed_write_entries(
+                            slot, _tcid_identity_key(getattr(event, "tool_call_id", None))
+                        )
+                        if _not_written:
+                            _same, _unproven = await asyncio.to_thread(
+                                _settle_failed_write, _not_written
+                            )
+                            _forget_entries(slot, _same)
+                            for _held in _unproven:
+                                _held["unverified_write"] = True
                 # MCP Apps (flag-independent on this side): if gatewayd spooled a
                 # UI payload it injected an opaque marker into the result text.
                 # Load it, push an mcp_app_render event to this slot, and strip
