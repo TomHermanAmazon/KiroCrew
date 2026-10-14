@@ -636,7 +636,7 @@ Wired sites:
 - Credential redaction — all egress scrubs route through the single
   `kiro_crew.platform.redact_via_context` shim (the one canonical
   fail-closed-aware shim; modules import it as `redact`). Covers: `agent.py`
-  SEL-audit callers, `mcp_core.py` chat-history/spawn output, `mcp_cron.py`
+  SEL-audit callers, `mcp_core_parts/` chat-history/crew output, `mcp_cron.py`
   deny-reason + script-vet + timezone messages, and `dashboard/handlers/files.py`
   file-content egress (slot append, file_read; file-watch and the download gate in
   `dashboard/file_api/transfer.py`) as well as the filename/path/description gates.

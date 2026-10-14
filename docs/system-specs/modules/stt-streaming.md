@@ -111,6 +111,23 @@ filesystem-permission claim, and a payload satisfying neither is refused.
 compressed member of the bundle contains a Mach-O, so this class of defect
 surfaces at sign time rather than as an opaque notarization `Invalid`.
 
+The batch path's import path is `kiro_crew.transcribe`: availability, the config
+read, the two provider-independent guards, `transcribe_audio`'s dispatch, the
+duration probe and the over-cap segmentation, plus the decoder's discovery and
+reporting surface (`ensure_ffmpeg_in_path`, `_find_ffmpeg`, `ffmpeg_source` and its
+codes, `find_brew`). It is a mirror facade
+(`kiro_crew._facade_mirror`) over three owners, so every name they define still
+reads and patches as `transcribe.<name>`, and they log as `kiro_crew.transcribe`. An
+exception class an owner defines (`VocabularyListError`) reports `kiro_crew.transcribe`
+as its module, so a traceback names the import path callers use.
+New work goes to the owner of its responsibility:
+
+| Owner | Owns |
+|---|---|
+| `transcribe_ffmpeg` | the decoder's execution path: resolving the executable to run (bundled image, fixed system directories, store), the authenticated private snapshot it runs from, the spawn, the exit description, the reap and the temporary-output cleanup |
+| `transcribe_aws` | the `transcribe` provider: its client-library availability, the profile credential resolver, the streaming transcription and the custom-vocabulary listing |
+| `transcribe_local` | the on-device providers: the `local` recogniser's WAV read, transcode and language, and the `apple` lane |
+
 Legacy provider values and the loader behavior for persisted values are in
 [Legacy provider values](#legacy-provider-values).
 

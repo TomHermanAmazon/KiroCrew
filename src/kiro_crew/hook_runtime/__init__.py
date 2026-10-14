@@ -4,8 +4,8 @@ The hook subsystem's rules are split by responsibility across the modules of thi
 package, and ``kiro_crew.hooks`` stays their only import path and their only patch
 surface: nothing but the facade imports an owner.
 
-Each owner holds functions moved verbatim from the one-module file, plus the
-definitions added since (the gate's tiers and ``GateFacts`` in ``gate_tiers``,
+Each owner holds functions moved verbatim from the one-module file (``hook_types`` and
+``script_hooks`` hold moved classes too), plus the definitions added since (the gate's tiers and ``GateFacts`` in ``gate_tiers``,
 ``ToolCall`` in ``tool_identity``). :func:`compose`
 makes every function an owner defines run on the facade module's globals rather than
 its own. Over a hundred production modules import ``kiro_crew.hooks``, and the tests patch its
@@ -18,12 +18,15 @@ consequences follow:
 
 * An owner's imports are inert for its functions. An owner imports the facade only
   under ``TYPE_CHECKING``, and stdlib names plainly; both serve the type checker and
-  the linter. Every name a function reads must exist in ``kiro_crew.hooks``, and
+  the linter. A ``@contextmanager``'s generator is not a function :func:`compose`
+  rebinds, so ``hooks.py`` rebinds the one an owner holds
+  (``ScriptHookStore._atomic_mutation``) right after :func:`compose`. Every name a function reads must exist in ``kiro_crew.hooks``, and
   ``test/test_hooks_composition_contract.py`` sweeps each function's bytecode to
   prove it does.
 * A function's ``__module__`` reads ``kiro_crew.hooks`` as it did before the split,
   so reprs and pickling by reference are unchanged and it logs through that module's
-  ``logger``. Its source file differs, so a log record's ``module``, ``filename`` and
+  ``logger``. A moved class keeps its owner's ``__module__``, which :func:`compose` reads to
+  select the classes whose methods it rebinds. Its source file differs, so a log record's ``module``, ``filename`` and
   ``lineno`` name the owner file.
 * State stays on the facade. Every module-level value -- the constants and event
   vocabularies, the deny-target grammar tables, the internal-read allowlists, the

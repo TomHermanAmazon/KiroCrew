@@ -5597,6 +5597,8 @@ wedged owner frame still reads as a gate stall.
 | `script_validation` | The fail-soft timeout normalization and the raising field validator both store write paths share |
 | `stream_caps` | A hook's bounded output drain, the truncation-marking decode and the concurrent stdin/stdout/stderr exchange |
 | `hook_dispatch` | The global store accessors, the strict on-disk read a store-less process uses, the informational tool-call fire, and the PreToolUse block gate with the names a matcher meets |
+| `hook_types` | The pipeline's value types: `HookResult`, the tool gate's verdict `ToolHookResult` (its constructors emit the approval-decision counter, which `test/metrics/test_business_counters.py` reads in this file), the rule dataclasses, `UserDeniedPattern`, and `HooksConfig` with its defensive parse of the `hooks` section |
+| `script_hooks` | Running script hooks: a hook process's environment (`_hook_subprocess_env`, the one reader of `_HOOK_BASE_ENV_KEYS`), one hook's sandboxed run (`run_script_hook`) and its `ScriptHookResult`, and `ScriptHookStore`, which persists the Hooks page's hooks, validates every edit and fires the hooks an event matches; `fire` sits beside `run_script_hook`, and `test_hook_events_kas_triggers` reads its source through the object |
 
 What stays in `hooks.py`, and why, because a guard or a contract reads it there:
 
@@ -5606,29 +5608,33 @@ What stays in `hooks.py`, and why, because a guard or a contract reads it there:
   An owner defines none, so a test that rebinds one here is the binding every function
   sees, and a `global` statement inside a rebound owner function writes this module's
   namespace;
-- the public result and config types (`HookResult`, `ToolHookResult`, `HooksConfig`,
-  `ScriptHook`, `ScriptHookResult`, `FileTooLargeError` and the rule dataclasses), so
-  their `__module__` and shapes are unchanged;
-- `ToolHookResult._count`, whose counter `test/metrics/test_business_counters.py` reads
-  in this file, and `uncounted_gate`'s ContextVar;
+- `ScriptHook` and `FileTooLargeError`. `ScriptHook`'s `event` field defaults to
+  `HOOK_EVENT_USER_PROMPT_SUBMIT`, and a class body runs in its own module: in an owner it
+  would read that constant before this module defines it. The other result and config
+  types live in `hook_types`, and a class keeps its owner's `__module__`: `compose`
+  selects the classes whose methods it rebinds by it, and nothing else reads it. Their
+  shapes are unchanged;
+- `uncounted_gate` and its ContextVar: a `contextmanager`'s generator is not a function
+  `compose` rebinds, so in an owner it would read the owner's globals (the one owner
+  `contextmanager`, `ScriptHookStore._atomic_mutation`, is rebound onto this module's
+  globals right after `compose`);
 - the tool gate's ORDER: `GATE_TIERS`, its row types (`GateTier`, `GateRule`) and kind
   vocabulary, and the literal `SHELL_DENY_TIERS`. The table is data a security review
   reads in one place, and it is built after `compose` so every row holds the rebound
   tier function (a row built before it would keep the owner's original, which a patch
   of `hooks.<name>` never reaches). `SHELL_DENY_TIERS` is a literal because
   `scripts/deny_diff.py` reads it as text (see the table below);
-- `HookManager` with every method. `judge(call, *, session_key, agent, app,
-  classifier_only)` walks `GATE_TIERS` under `_fail_closed_on_gate_crash`;
-  `on_tool_call` is its keyword form for the dispatchers that hold a call as keywords
-  (`**hook_gate_kwargs(event)`), keeps its signature, and is what every production
-  surface calls — the tests patch it at class and instance level;
-- `ScriptHookStore` with every method: `fire` is the dispatch the placement ruling
-  keeps beside `run_script_hook`, `test_hook_events_kas_triggers` reads its source, and
-  a class's methods do not split across files;
-- `ScriptHook.from_dict` and `run_script_hook`, the redaction call sites
-  `security_posture.NON_EGRESS_REDACTION_MODULES` classifies by this file's name;
-- `_hook_subprocess_env`, kept beside `_HOOK_BASE_ENV_KEYS` by choice: it is the one
-  reader of the allowlist this page tells an operator to edit;
+- `HookManager` with every method, and `_fail_closed_on_gate_crash`. `judge(call, *,
+  session_key, agent, app, classifier_only)` walks `GATE_TIERS` under
+  `_fail_closed_on_gate_crash`; `on_tool_call` is its keyword form for the dispatchers
+  that hold a call as keywords (`**hook_gate_kwargs(event)`), keeps its signature, and
+  is what every production surface calls — the tests patch it at class and instance
+  level. Both are wrapped when the class body runs, and `compose` rebinds no function
+  held in a closure, so in an owner the wrapped bodies would read the owner's globals;
+  moving the manager is a decomposition (collaborators behind the class), not a move;
+- `ScriptHook.from_dict`, a redaction call site `security_posture.NON_EGRESS_REDACTION_MODULES`
+  classifies by this file's name (`run_script_hook`, the other one, has the
+  `hook_runtime/script_hooks.py` row);
 - `_screen_windows_links`, which `test/link_screen_sites.py` keys by this path;
 - `_cu_read_only_auto_approve`, which `governance.md` names here (the Plane A gate
   threading it names beside it is the `governance` tier in `gate_tiers`);
@@ -5672,8 +5678,9 @@ grant, and pins `SHELL_DENY_TIERS` to the projection.
 
 New work goes to the owner of its responsibility. A new gate check is a tier body in
 `gate_tiers` plus its row in `GATE_TIERS`, placed by kind; a new fact about a call is a
-`ToolCall` field filled by `from_event`. A new module-level value, a new `HookManager`
-method and a new store method go here.
+`ToolCall` field filled by `from_event`. A new module-level value and a new
+`HookManager` method go here; a new store method goes to `script_hooks`, and a new
+result or config type to `hook_types`.
 
 ### Script hooks (`ScriptHook`, `run_script_hook`) — the shell per platform
 

@@ -1688,7 +1688,7 @@ Managed servers, registered by `agent._MANAGED_MCP_SERVERS` and installed into
 | Server | Process | Tools |
 |--------|---------|-------|
 | `kirocrew-cron` | `kirocrew mcp-cron` (`mcp_cron.py`) | `cron_add`, `cron_list`, `cron_update`, `cron_remove`, `cron_remove_all`, `cron_pause`, `cron_resume`, `cron_trigger`, `cron_secret_request` |
-| `kirocrew-core` | `kirocrew mcp-core` (`mcp_core.py` + `mcp_tools/`) | spawn/subagent, learn, task, messaging, artifact, workflow, knowledge and session-directive tools (see below) |
+| `kirocrew-core` | `kirocrew mcp-core` (`mcp_core.py` + `mcp_core_parts/` + `mcp_tools/`) | spawn/subagent, learn, task, messaging, artifact, workflow, knowledge and session-directive tools (see below) |
 | `kirocrew-computer` | `kirocrew mcp-computer` (`mcp_computer.py`) | `computer_list_apps`, `computer_launch_app`, `computer_get_state`, `computer_click`, `computer_drag`, `computer_type_text`, `computer_press_key`, `computer_set_value`, `computer_scroll`, `computer_perform_action`, `computer_end_turn` |
 | `kirocrew-dashboard` | `kirocrew mcp-dashboard` (`mcp_dashboard.py`) | `chat_folder_tree`, `chat_folder_create`, `chat_folder_move`, `chat_folder_update`, `chat_folder_move_session`, `chat_folder_delete`, `chat_folder_file_self`, `chat_tag_list`, `chat_tag_create`, `chat_tag_update`, `chat_tag_assign`, `chat_tag_column_list`, `chat_tag_column_create`, `chat_tag_column_move`, `session_move_to_column`, `chat_session_pin`, `session_create`, `session_fork`, `session_stop`, `session_end_wait`, `session_retry`, `session_continue`, `session_set_model`, `session_reload`, `session_rename`, `session_generate_title`, `session_close`, `session_revive`, `session_history_list`, `session_send`, `session_broadcast`, `session_status`, `session_adopt`, `session_release`, `session_read_message`, `session_summary` |
 | `kirocrew-work` | `kirocrew mcp-work` (`mcp_work.py`) | `work_brief`, `work_report`, `work_ledger_read`, `work_ledger_rebuild`, `work_ledger_record` |
@@ -2477,6 +2477,21 @@ that rebinds one (`patch("kiro_crew.mcp_core._post")`, `setattr(mcp_core, "sel",
 …)`) still intercepts the handler. A direct import would bind at import time and
 silently escape every such patch. `mcp_core._HANDLER_SURFACE` names the bindings
 that exist only for this purpose, so an import cleanup cannot quietly delete one.
+
+`mcp_core.py` keeps the server itself — `tools/list`, the call path and its call
+context, directive capture, the knowledge cache, `_send` and the five verbs — and is a
+mirror facade (`kiro_crew._facade_mirror`) over the owners in `mcp_core_parts/`, so
+every name they define still reads and patches as `mcp_core.<name>`. New plumbing goes
+to the owner of its responsibility:
+
+| Owner | Owns |
+|---|---|
+| `identity` | which session is calling: the lenient and strict resolvers, `require_strict_session_key` and its diagnosis, `REFLEXIVE_TOOL_MODULES`, the Slack identity classification |
+| `gateway` | where a call goes: the port, base URL and unix-socket caches, one request's target, the refused-target replay and re-verification, the internal secret, the identity headers, and `_send`'s retry schedule, failure text and error body |
+| `governance` | channel-agent containment and the messaging, browse, channel and memory-write vets |
+| `crew` | Crew Mode's `route_crew` and `select_crew` bodies |
+| `history` | the chat-history search tools' scoping, redaction and snippet helpers |
+| `radar_crew` | the Issue Radar crew tools' identity, ledger view and write scrubbing |
 
 The remaining upward dependency is known: the plumbing could move to a module the
 handlers own, which would make `mcp_tools` a leaf. That is a separate change —
@@ -3984,13 +3999,14 @@ Three failure modes follow.
 **1. Identity is not the process, it is the call.** `KIROCREW_SESSION_KEY` and
 `os.getppid()` identify the *process*, which is wrong by construction in a shared
 backend: the warm pool spawns with an empty key, and a sub-agent inherits its
-parent's tree. `mcp_core.py` offers two resolvers:
+parent's tree. `mcp_core.py` offers two resolvers (both defined in
+`mcp_core_parts/identity.py`):
 
 - `_resolve_session_key_strict` for **anything that mutates or targets a
   specific session** (post to a slot, change its state, deliver a callback) —
   reached ONLY through `require_strict_session_key()`, the shared fail-closed
   gate every reflexive tool module routes through (`REFLEXIVE_TOOL_MODULES`
-  enumerates them; a ratchet test rejects direct calls outside `mcp_core`). It
+  enumerates them; a ratchet test rejects direct calls outside `mcp_core_parts/identity.py`). It
   accepts only the gateway-injected caller context (`mcp_caller.current_caller()`,
   which gatewayd stamps on every forwarded frame after stripping any
   client-forged `kirocrew.caller` block), the signed per-session token

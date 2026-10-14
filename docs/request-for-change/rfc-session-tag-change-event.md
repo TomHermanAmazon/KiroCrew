@@ -52,7 +52,7 @@ adding a subsystem. The positions this RFC takes, one line each:
 4. **Re-entrancy** is settled now, not deferred: the event carries **advisory
    provenance**, following the in-repo precedent that `Stop` self-limits by
    advisory `hook_continuation_count` / `stop_hook_active`
-   (`ScriptHookStore.fire`'s `Stop` payload in `src/kiro_crew/hooks.py`) rather than an enforced cap.
+   (`ScriptHookStore.fire`'s `Stop` payload in `src/kiro_crew/hook_runtime/script_hooks.py`) rather than an enforced cap.
 5. **Placement** is a **sixth `HOOK_EVENTS` entry** (a `SessionTagsChanged`
    script-hook event), because the ask is to *run an automation now* on the
    transition, which is precisely what the script-hook engine does, not to
@@ -120,13 +120,13 @@ Three neighbouring issues sit around this one; none asks for it:
 - **No new capability surface.** Script hooks are already governance-gated by
   `capabilities.script_hooks`, default OFF, via
   `_script_hooks_capability_denied` (`src/kiro_crew/hook_runtime/governance_gate.py`, checked
-  inside `run_script_hook` (`src/kiro_crew/hooks.py`, offloaded through its
+  inside `run_script_hook` (`src/kiro_crew/hook_runtime/script_hooks.py`, offloaded through its
   `asyncio.to_thread` call)). A tag-change hook rides that same gate;
   the capability surface does not widen.
 - **Dispatch from an HTTP handler with no agent turn is already supported.**
   `api_hook_test` (`src/kiro_crew/dashboard/handlers/hooks.py`) calls
   `run_script_hook` with a synthesized payload, and `run_script_hook`
-  (`src/kiro_crew/hooks.py`) builds a default `hook_event` itself when passed
+  (`src/kiro_crew/hook_runtime/script_hooks.py`) builds a default `hook_event` itself when passed
   `None`, requiring no session and no agent config. A tag-write
   handler firing a hook is the same shape.
 
@@ -214,7 +214,7 @@ This follows the settled in-repo precedent: `Stop` controls its own re-entrancy
 with **advisory** signals, not an enforced cap. `hook_continuation_count` (the
 depth of the current continuation run) and `stop_hook_active` (its boolean
 shorthand) are stamped on the `Stop` payload unconditionally
-(`ScriptHookStore.fire` in `src/kiro_crew/hooks.py`) precisely so a hook *may* self-limit while a
+(`ScriptHookStore.fire` in `src/kiro_crew/hook_runtime/script_hooks.py`) precisely so a hook *may* self-limit while a
 real gate hook checks its own condition and ignores them. The comment there is
 explicit: *"Kiro's Stop contract defines no cap ... a hook may self-limit,
 diagnose, or surface the count."* We adopt the same stance: the runtime provides
@@ -448,7 +448,7 @@ and the emit helper.
 - **Enforced re-entrancy suppression.** Rejected per Question 4: it would swallow
   legitimate rapid transitions and would be the only enforced re-entrancy control
   in the hook engine, contradicting the advisory `Stop` precedent
-  (`ScriptHookStore.fire`'s `Stop` payload in `hooks.py`).
+  (`ScriptHookStore.fire`'s `Stop` payload in `hook_runtime/script_hooks.py`).
 
 ## Open questions
 

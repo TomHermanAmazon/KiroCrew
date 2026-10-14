@@ -506,7 +506,7 @@ kept out of `remaining`.
 ### MCP chat-history tools (`mcp_tools/sessions.py`)
 
 Their specs and handlers live in `mcp_tools/sessions.py`; `mcp_core.py` supplies only
-the scoping helpers. These read-only tools expose the session store to the agent and are all
+the scoping helpers (defined in `mcp_core_parts/history.py`). These read-only tools expose the session store to the agent and are all
 workspace-scoped by default (fail-closed via `_caller_workspace`/`_ws_bucket`,
 `all_workspaces` opts out), exclude incognito/temporary sessions (canonical
 `INCOGNITO_MEMORY_MODES` in `history.py`), and redact their output:

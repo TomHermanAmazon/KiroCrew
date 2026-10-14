@@ -1779,7 +1779,7 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         # can only name a bad input, not a second command. `_SPAWN_NAMES` propagates
         # this audit through the generic helper, so each caller remains independently
         # reviewed and a future caller fails the gate until it is classified.
-        "transcribe.py::_create_ffmpeg_subprocess",
+        "transcribe_ffmpeg.py::_create_ffmpeg_subprocess",
         # The macOS authenticity oracle for the bundled ffmpeg: spawns the
         # absolute /usr/bin/codesign (never PATH) with constant flags and a
         # requirement string built from a module-level team-ID constant. The
@@ -1789,7 +1789,7 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         # over command, args, cwd, or env. It cannot route through
         # sandboxed_spawn_argv: codesign must read the system trust store and
         # evaluate the Apple certificate chain, which the OS sandbox denies.
-        "transcribe.py::_macos_developer_id_authentic",
+        "transcribe_ffmpeg.py::_macos_developer_id_authentic",
         # `_pcm_via_ffmpeg` decodes a container the stdlib cannot read (a Slack
         # voice memo's ogg/Opus, an uploaded m4a) down to the 16 kHz mono PCM the
         # recogniser takes. Fixed argv, ffmpeg only; the sole variable part is a
@@ -1803,7 +1803,7 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         # file at all (`-f null -`), and the only variable argv element a
         # positional path that `_vet_audio_file` validated and the route then
         # snapshot-copied via `pinned_fs` into its own 0700 directory.)
-        "transcribe.py::_pcm_via_ffmpeg",
+        "transcribe_local.py::_pcm_via_ffmpeg",
         "transcribe.py::audio_exceeds_secs",
         # The two spawns that split an over-cap recording for the meetings import
         # route, both ffmpeg-only through `_create_ffmpeg_subprocess` above, so
@@ -1819,13 +1819,13 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         # not agent input.
         "transcribe.py::_detect_silence_ends",
         "transcribe.py::_extract_segment",
-        "transcribe.py::_transcribe_aws",
+        "transcribe_aws.py::_transcribe_aws",
         # The build probe executes the same authenticated image with the single
         # fixed `-version` argument; it accepts no external input at all. Both
         # streams are CAPTURED rather than discarded, so a refusal can name itself
         # in the build log, and are decoded with errors="replace" because a loader
         # complaint arrives in the host's console encoding.
-        "transcribe.py::_packaged_ffmpeg_version_probe",
+        "transcribe_ffmpeg.py::_packaged_ffmpeg_version_probe",
         # JSON-Schema ``pattern`` validation for MCP app→gateway tool-call args
         # (validate_mcp_tool_arguments). The spawn's command surface is FULLY
         # fixed and NOT agent-selectable: binary is our own ``sys.executable``,

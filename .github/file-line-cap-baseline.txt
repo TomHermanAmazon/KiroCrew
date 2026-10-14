@@ -118,13 +118,11 @@
 4478 src/kiro_crew/history_consolidation.py
 2128 src/kiro_crew/history_projection.py
 2038 src/kiro_crew/history_search.py
-2857 src/kiro_crew/hooks.py
 6535 src/kiro_crew/instances/ssh_tunnel_manager.py
 4897 src/kiro_crew/kiro_prerequisite.py
 2007 src/kiro_crew/knowledge/ingestion.py
 4540 src/kiro_crew/knowledge/store.py
 3928 src/kiro_crew/llm_helpers.py
-2866 src/kiro_crew/mcp_core.py
 3951 src/kiro_crew/mcp_cron.py
 4804 src/kiro_crew/mcp_dashboard.py
 3778 src/kiro_crew/mcp_discovery.py
@@ -182,7 +180,6 @@
 2730 src/kiro_crew/telegram/renderer.py
 2490 src/kiro_crew/telegram/transport_dispatch.py
 2272 src/kiro_crew/tool_call_title.py
-2923 src/kiro_crew/transcribe.py
 2250 src/kiro_crew/ui_index.py
 5484 src/kiro_crew/validation.py
 4637 src/kiro_crew/vector_memory.py

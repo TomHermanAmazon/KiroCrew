@@ -402,7 +402,7 @@ Guards on `next_wake`:
   (`cron:{job.id}`) and may mutate **only that job**. It is refused outright
   from any non-`cron:` session, and from a subagent, using the strict env-only
   resolution `monitor_start` already uses for the same reason
-  (`mcp_tools/control.py` (`monitor_start`), resolving via `mcp_core.py`
+  (`mcp_tools/control.py` (`monitor_start`), resolving via `mcp_core_parts/identity.py`
   (`_resolve_session_key_strict`)) — a child process must not be able to
   PID-walk into its parent's identity and reschedule it.
 
@@ -912,7 +912,7 @@ believed everything was stopped.
 - **Self-rescheduling is self-scoped.** `agent_sleep` resolves its target from
   `KIROCREW_SESSION_KEY` and may write only that job. Strict env-only
   resolution (no PID walk) prevents a subagent from assuming its parent's
-  identity, matching the reasoning already recorded at `mcp_core.py`
+  identity, matching the reasoning already recorded at `mcp_core_parts/identity.py`
   (`_resolve_session_key_strict`).
 - **The goal is not agent-writable.** Writes to `LIFE.md` are refused, so an
   agent cannot widen its own mandate. Boundaries live in the same file.

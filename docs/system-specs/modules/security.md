@@ -3504,7 +3504,7 @@ identity, resolved **strictly** — gateway-injected `KIROCREW_SESSION_KEY` env
 var or an HMAC-sidecar-verified host-pid only; **no** `/proc` ancestor walk and
 **no** `session_pid_*.txt` filesystem glob. This closes both the
 forged-`session_pid_*.txt` path and the subagent→parent misresolution path
-(`_resolve_session_key_strict()` in `mcp_core.py`).
+(`_resolve_session_key_strict()` in `mcp_core_parts/identity.py`).
 
 The identity is classified into **three** states by
 `_classify_slack_identity() -> (state, thread_ts|None)`. Collapsing the two

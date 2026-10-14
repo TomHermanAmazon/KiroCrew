@@ -255,7 +255,7 @@ class TestCallSitesAreWired:
         "WORKFLOW_RUNS": "workflows/runner.py",
         "CONTEXT_COMPACTIONS": "session_compaction.py",
         "MCP_RECONNECTS": "mcp_gateway/stub.py",
-        "APPROVAL_DECISIONS": "hooks.py",
+        "APPROVAL_DECISIONS": "hook_runtime/hook_types.py",
         "ADAPTIVE_DECISIONS": "adaptive/controller.py",
         # Overload-resilience series (RFC §10). Sampled ones are emitted by the
         # structured health sampler; the recovery ones by the ladder; the
@@ -310,7 +310,7 @@ class TestAttributeValuesAreBounded:
             "session_compaction.py",
             "mcp_gateway/stub.py",
             "mcp_gateway/manager.py",
-            "hooks.py",
+            "hook_runtime/hook_types.py",
             "adaptive/controller.py",
             "dashboard/session_health.py",
             "taskq/store.py",

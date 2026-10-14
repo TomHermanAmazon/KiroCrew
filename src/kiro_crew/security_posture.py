@@ -2322,6 +2322,14 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         "knowledge/ingestion.py",
         "workflows/library.py",
         "mcp_core.py",
+        # The same server's owner modules, same class: they redact an HTTP error
+        # body, a history snippet, a crew error and the issue-radar crew's writes
+        # before ``mcp_core`` returns or forwards them, and the egress boundary is
+        # the transport the result crosses.
+        "mcp_core_parts/crew.py",
+        "mcp_core_parts/gateway.py",
+        "mcp_core_parts/history.py",
+        "mcp_core_parts/radar_crew.py",
         # Same class as mcp_core.py: this stdio server redacts every rendered tool
         # result -- a crew log page, a fold, a refusal -- before returning it, but
         # the egress boundary is the transport the result crosses, not this module.
@@ -2679,10 +2687,13 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         # ``_setup_cli_logging`` matches the drift-guard's redaction regex.
         # The CLI is not an egress boundary — it's an installer, not a sink.
         "cli.py",
-        # Defensive scrub: hooks.py redacts stderr before storing in last_error
-        # (an internal model field). The egress boundary is the dashboard API
-        # handler that serializes hooks via to_dict() — already a registered sink.
+        # Defensive scrub: hooks.py redacts a persisted last_error as it loads a
+        # hook (ScriptHook.from_dict), and hook_runtime/script_hooks.py redacts a
+        # hook's output before storing it in last_error (an internal model field).
+        # The egress boundary is the dashboard API handler that serializes hooks
+        # via to_dict() — already a registered sink.
         "hooks.py",
+        "hook_runtime/script_hooks.py",
         # Helper, not a boundary: `redact_oauth_client_secrets` /
         # `restore_redacted_oauth_client_secrets` are pure functions over an agent
         # spec dict that mask (and, on the write-back, un-mask) a pre-registered

@@ -168,6 +168,13 @@ _BASE_OWNERS: dict[str, tuple[str, ...]] = {
         set_global_hook_store get_global_hook_store persisted_hook_store
         fire_tool_hooks pre_tool_match_names permission_pre_tool_block
         """.split()),
+    "hook_types": tuple("""
+        HookResult ToolHookResult ContextRule AutoReplyHook TransformHook
+        UserDeniedPattern HooksConfig
+        """.split()),
+    "script_hooks": tuple("""
+        _hook_subprocess_env ScriptHookResult run_script_hook ScriptHookStore
+        """.split()),
 }
 
 _MOVED = frozenset(name for names in _BASE_OWNERS.values() for name in names)
@@ -194,34 +201,23 @@ _NEW_OWNER_DEFS: dict[str, tuple[str, ...]] = {
 #: Re-pinned once since: ``_governance_denial`` gained ``alias_groups`` and
 #: ``deny_aliases`` (the KAS tool-id spellings ``gate_decision`` reads as one
 #: identity), both keyword defaults, so every pre-split caller still fits.
-_BASE_SHAPE_DIGEST = "929fdbd29a36ecad562006ef00c3e12aa5e75886bc79d2c874e6d5ab50a3758a"
+_BASE_SHAPE_DIGEST = "869ba96660ec8f4ea710d6c3dcbbbec3cfcd25827358d3bac7a597102d6860bb"
 
 #: Definitions that stay in the facade file, each because a guard, a contract or the
 #: ``compose`` ordering reads it there. The reason per entry is in
 #: ``docs/system-specs/modules/memory-skills-hooks.md``'s "Hook runtime owners".
 _FACADE_DEFS = (
-    "HookResult",
     "uncounted_gate",
-    "ToolHookResult",
     "_fail_closed_on_gate_crash",
     "GateRule",
     "GateTier",
-    "ContextRule",
-    "AutoReplyHook",
-    "TransformHook",
-    "UserDeniedPattern",
-    "HooksConfig",
     "HookManager",
     "_cu_read_only_auto_approve",
     "_unc_data_home_root",
     "_unc_agents_root",
     "_screen_windows_links",
     "FileTooLargeError",
-    "_hook_subprocess_env",
     "ScriptHook",
-    "ScriptHookResult",
-    "run_script_hook",
-    "ScriptHookStore",
 )
 
 #: Collaborators the facade re-offers that belong to another module. Their identity is
@@ -428,12 +424,12 @@ def test_every_moved_name_is_one_object_in_its_owner() -> None:
     ]
     assert strays == []
     names = [name for group in _BASE_OWNERS.values() for name in group]
-    assert len(names) == len(set(names)) == 71
+    assert len(names) == len(set(names)) == 82
 
 
 def test_the_moved_names_keep_their_base_shapes() -> None:
     lines = sorted(f"{name} {_shape(getattr(hooks_mod, name))}" for name in _MOVED)
-    assert len(lines) == 71
+    assert len(lines) == 82
     digest = hashlib.sha256("\n".join(lines).encode()).hexdigest()
     assert digest == _BASE_SHAPE_DIGEST, "\n".join(lines)
 
@@ -880,14 +876,16 @@ def test_the_unc_root_memos_are_primed_on_the_facade(tmp_path: Path) -> None:
 
 
 def test_the_gate_still_carries_what_the_source_guards_read() -> None:
-    """Two guards read this file's own text rather than a symbol, so they constrain
-    WHERE that construct lives: ``test_business_counters`` greps the file for the
-    approval counter (its emit is ``ToolHookResult._count``), and
-    ``test/link_screen_sites.py`` keys ``_screen_windows_links`` by this path. The gate
-    table's kinds are a closed vocabulary that ``GateTierKind`` spells for the type
-    checker and ``_GATE_TIER_KINDS`` orders for the soundness check."""
+    """Two guards read a file's own text rather than a symbol, so they constrain
+    WHERE that construct lives: ``test_business_counters`` greps
+    ``hook_runtime/hook_types.py`` for the approval counter (its emit is
+    ``ToolHookResult._count``), and ``test/link_screen_sites.py`` keys
+    ``_screen_windows_links`` by this path. The gate table's kinds are a closed
+    vocabulary that ``GateTierKind`` spells for the type checker and ``_GATE_TIER_KINDS``
+    orders for the soundness check."""
     source = _FACADE_PATH.read_text(encoding="utf-8")
-    assert "APPROVAL_DECISIONS" in source and "emit_counter" in source
+    counted = source + (_OWNER_DIR / "hook_types.py").read_text(encoding="utf-8")
+    assert "APPROVAL_DECISIONS" in counted and "emit_counter" in counted
     assert "_screen_windows_links" in source
     module_level = {
         node.name
