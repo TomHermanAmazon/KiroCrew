@@ -335,7 +335,14 @@ def _url_payload_command(n: int) -> str:
 #: Raised again, from 29,293, for the ``engines`` leaf in ``paths.py``: the KAS
 #: engine bundle the gateway installs and later executes joins the file-tool floor
 #: beside ``playwright-cli`` -- one entry and its reason. No matcher moved.
-_PACKAGE_LINE_BUDGET = 29_296
+#:
+#: Raised again, from 29,296, for ``exfil.restore_allowed_links``: an allowed host
+#: with several different addresses in one reply pairs its placeholders with its
+#: records by order instead of staying blocked, and every address put back must
+#: read as one whole URL where it lands. Display-time only; no redaction rule,
+#: pattern or threshold moved. Then by 2 for the ``ordered`` gate (older rows keep the
+#: one-address rule) and the check that an address never lands inside another URL.
+_PACKAGE_LINE_BUDGET = 29_312
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
