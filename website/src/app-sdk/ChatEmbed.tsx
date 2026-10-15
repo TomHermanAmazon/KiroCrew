@@ -17,7 +17,9 @@
  * widens that window by a page per press, up to the handler's own ceiling. An
  * unbounded poll re-read a whole 10 MB thread every second while it ran; the
  * rows are virtualized too, so the DOM cost no longer grows with history
- * either. Incremental (since-cursor) polling is the recorded follow-up.
+ * either. Each poll is incremental (chat-core P5-f): it echoes the cursor the
+ * last read returned and gets back only the rows after it, or the whole page
+ * when anything earlier changed (`embedIncrementalRead`).
  *
  * Sending goes through the chat-core transport (`sendTurn`) over the app-sdk
  * wire, so the receipt contract is the shared one and the host app's
@@ -28,7 +30,7 @@
  * runs. The root's Voice atom is off for this surface (`EMBED_CAPABILITIES`).
  */
 import { useRef, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Paperclip } from 'lucide-react'
 import ChatMessageList, { type VirtualTranscriptHandle } from './ChatMessageList'
 import ErrorNotice from '../components/ErrorNotice'
@@ -49,6 +51,7 @@ import { sendFailureCopy, deliveryUnconfirmedCopy } from '../chat-core/transport
 import { mergeRecoveredDraft } from '../utils/chatDrafts'
 import { drainEmbedRecovery, stashEmbedRecovery, subscribeEmbedRecovery, type PendingEmbedRecovery } from './embedSendRecovery'
 import { retireSendTail, type SendTail } from './embedSendTails'
+import { embedReadPath, isEmbedCursor, mergeEmbedRead, type EmbedCursor } from './embedIncrementalRead'
 import type { ChatMessage } from '../types'
 import { loadChatConfig } from '../pages/chat/ChatSettings'
 import QueueStack, { SubagentDeliveryProgress, splitPaneMessages } from '../components/QueueStack'
@@ -173,6 +176,12 @@ interface ChatSlotData {
   title?: string
   /** Older rows exist beyond the bounded page. */
   has_more?: boolean
+  /** Absolute index of the page's first row. */
+  next_before?: number
+  /** What the next poll echoes to get only the rows after it. */
+  cursor?: EmbedCursor
+  /** Present when this read carried only the rows after the echoed cursor. */
+  delta?: { from: number; since: number }
   /** Messages waiting for the running turn: sent from this embed while busy,
    *  or from another surface. Rendered read-only above the composer. */
   queue?: unknown[]
@@ -331,11 +340,19 @@ function ChatEmbed({
   // One failure-run record per query key, shared by the poll cadence and the
   // stall notice so both measure the same outage.
   const failureRunsRef = useRef<FailureRuns>(new Map())
+  const queryClient = useQueryClient()
   const { data: slotData, refetch, isPlaceholderData, isError, isFetching, status, dataUpdatedAt, errorUpdatedAt } = useQuery({
     queryKey: ['app-sdk-embed', slotKey, limit],
-    queryFn: () => api.get<ChatSlotData>(
-      '/api/chat/slots/' + encodeURIComponent(slotKey) + '?limit=' + limit,
-    ),
+    // Incremental: the held page's cursor is echoed, and only the rows after
+    // it come back while the rest still render the same (see
+    // embedIncrementalRead). A delta that does not fit is read again whole.
+    queryFn: async ({ queryKey }) => {
+      const [, key, lim] = queryKey as [string, string, number]
+      const held = queryClient.getQueryData<ChatSlotData>(queryKey)
+      const sent = isEmbedCursor(held?.cursor) ? held.cursor : null
+      const res = await api.get<ChatSlotData>(embedReadPath(key, lim, sent))
+      return mergeEmbedRead(held, sent, res) ?? api.get<ChatSlotData>(embedReadPath(key, lim, null))
+    },
     // A wider page replaces the narrower one on arrival; until then the rows
     // already on screen stay put instead of blinking through an empty list.
     // Same slot only: a slot change must not paint the previous slot's rows

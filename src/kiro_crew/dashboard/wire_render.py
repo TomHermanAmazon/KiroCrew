@@ -197,22 +197,39 @@ def prepare_messages_json(
     Same arguments and the same contract as ``chat_utils._prepare_messages``;
     the result is the JSON array text instead of the list.
     """
+    parts = prepare_message_fragments(messages, running, live_child=live_child, workspace=workspace)
+    return "[" + ", ".join(f for f in parts if f is not None) + "]"
+
+
+def prepare_message_fragments(
+    messages: list[dict],
+    running: bool,
+    *,
+    live_child: str,
+    workspace: str | None = None,
+    use_memo: bool = True,
+) -> list[str | None]:
+    """Each collapsed row's serialized render, in order, ``None`` where it renders as nothing.
+
+    One entry per row of ``_collapse_wire_rows(messages)``, so a position in the
+    list is a position in the page. ``use_memo=False`` renders every row afresh;
+    either way the joined non-``None`` entries are the text
+    :func:`prepare_messages_json` returns.
+    """
     with _cu.scoped_exempt_hosts(_cu.allowed_hosts_for(workspace)):
-        memo = not credential_pass_bypassed()
+        memo = use_memo and not credential_pass_bypassed()
         context = _context_digest() if memo else b""
-        parts: list[str] = []
+        parts: list[str | None] = []
         for m in _cu._collapse_wire_rows(messages):
             # Streaming changes every delta. OAuth URLs depend on revocable
             # endpoint approvals, so neither role is safe or useful to memoize.
             # Compare with ==: a hand-edited row may carry an unhashable role.
             role = m.get("role", "")
             if not memo or role == "chunk" or role == "mcp_oauth":
-                fragment = _render_row(m, running, live_child)
+                parts.append(_render_row(m, running, live_child))
             else:
-                fragment = _memo_row(m, running, live_child, context)
-            if fragment is not None:
-                parts.append(fragment)
-    return "[" + ", ".join(parts) + "]"
+                parts.append(_memo_row(m, running, live_child, context))
+    return parts
 
 
 # Fills running in the background, at most this many at once. A read that finds

@@ -792,6 +792,13 @@ async def api_chat_slot_detail(request: web.Request) -> web.Response:
         no caller asking for 0 wanted exactly one message.
       - ``before``: return messages before this index (legacy pagination, still supported).
         ``before=0`` is valid and yields an empty page.
+      - ``cursor=1``: the response also carries ``cursor`` for an incremental
+        read. ``from`` + ``since`` + ``digest`` echo that cursor back, and the
+        response then holds only the rows from ``since`` on (marked ``delta``)
+        when the reader's copy of the earlier rows is still current, or the full
+        page when it is not. See ``kiro_crew.dashboard.slot_detail_delta``.
+        Either form routes to the paged read and cannot be combined with
+        ``before``.
 
     Either param being a non-integer is a 400, not an uncaught 500 out of the
     handler.
@@ -830,12 +837,28 @@ async def api_chat_slot_detail(request: web.Request) -> web.Response:
         return web.json_response(
             {"error": "limit must be >= 1", "code": "limit_out_of_range"}, status=400
         )
+    # The incremental-read cursor (``slot_detail_delta``). Imported here, not at
+    # module scope: this function runs on the handlers module's globals.
+    from kiro_crew.dashboard import slot_detail_delta
+
+    try:
+        delta_cursor, cursor_mode = slot_detail_delta.parse_delta_query(request.query)
+    except slot_detail_delta.DeltaQueryError as exc:
+        return web.json_response({"error": str(exc), "code": "invalid_query_params"}, status=400)
+    if cursor_mode and before_raw is not None:
+        # A cursor addresses the newest page; an older page has its own cursor.
+        return web.json_response(
+            {"error": "a cursor read cannot also pass before", "code": "invalid_query_params"},
+            status=400,
+        )
+    # The rows composed: the reader's page, reaching back to its cursor's span.
+    read_limit = slot_detail_delta.read_limit(limit, delta_cursor)
 
     # No limit → load ALL messages (chained across gateway restarts).
     # In-memory slot.messages is authoritative for the current session.
     # _disk_older_count gates whether to read disk AND provides the stable
     # slice boundary (set at restore/resume, never drifts with new messages).
-    if limit_raw is None and before_raw is None:
+    if limit_raw is None and before_raw is None and not cursor_mode:
         mem_msgs = list(slot.messages)
         if slot._disk_older_count > 0 and state.conversation_log:
             history_key = slot_history_key(slot)
@@ -1079,7 +1102,7 @@ async def api_chat_slot_detail(request: web.Request) -> web.Response:
                         state.conversation_log,
                         paged_slot,
                         history_key,
-                        limit=limit,
+                        limit=read_limit,
                         before=before,
                         snapshot=tail_snapshot,
                         # The count the PAGE witness holds, so the read is measured
@@ -1210,7 +1233,7 @@ async def api_chat_slot_detail(request: web.Request) -> web.Response:
             all_msgs = await asyncio.to_thread(_collapse_wire_rows, all_msgs)
             total = len(all_msgs)
             end = max(0, min(before, total)) if before is not None else total
-            start = max(0, end - limit)
+            start = max(0, end - read_limit)
             messages = all_msgs[start:end]
             has_more = start > 0
             next_before = start
@@ -1277,15 +1300,39 @@ async def api_chat_slot_detail(request: web.Request) -> web.Response:
         # The session's stored display verdicts (display_verdicts) let a cold
         # render skip the scan for every string a save already judged.
         with display_verdicts.session(verdict_key):
-            messages_json = (
-                wire_render.prepare_messages_json(
+            plan: slot_detail_delta.PagePlan | None = None
+            if cursor_mode:
+                # Row by row, so a position in the page can be checked against
+                # the reader's cursor and only the rows after it sent.
+                plan = slot_detail_delta.plan_page(
+                    wire_render.prepare_message_fragments(
+                        messages,
+                        running,
+                        live_child=live_child,
+                        workspace=workspace,
+                        use_memo=use_memo,
+                    ),
+                    page_start=next_before,
+                    total=total,
+                    window=limit,
+                    cursor=delta_cursor,
+                )
+                messages_json = "[" + ", ".join(plan.fragments) + "]"
+            elif use_memo:
+                messages_json = wire_render.prepare_messages_json(
                     messages, running, live_child=live_child, workspace=workspace
                 )
-                if use_memo
-                else json.dumps(
+            else:
+                messages_json = json.dumps(
                     _prepare_messages(messages, running, live_child=live_child, workspace=workspace)
                 )
-            )
+        page_fields: dict[str, Any] = {"has_more": has_more, "next_before": next_before}
+        if plan is not None:
+            page_fields = {"has_more": plan.has_more, "next_before": plan.next_before}
+            if plan.cursor is not None:
+                page_fields["cursor"] = plan.cursor
+            if plan.delta is not None:
+                page_fields["delta"] = plan.delta
         head = json.dumps(
             {
                 "key": key,
@@ -1303,8 +1350,7 @@ async def api_chat_slot_detail(request: web.Request) -> web.Response:
             {
                 "queue": [queue_entry_view(q) for q in queue_snapshot],
                 "total": total,
-                "has_more": has_more,
-                "next_before": next_before,
+                **page_fields,
                 # Seeds the context meter on open. Turn-scoped WS frames alone
                 # leave it empty for a session reopened in a new tab; omitted
                 # entirely (not zeroed) when genuinely unknown, so the frontend

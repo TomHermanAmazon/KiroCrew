@@ -418,7 +418,7 @@ describe('ChatEmbed', () => {
       })
 
       // Bounded to one page (P5-e): the newest EMBED_PAGE_LIMIT rows, never the whole slot.
-      expect(mockGet).toHaveBeenCalledWith('/api/chat/slots/' + encodeURIComponent('test-slot') + '?limit=200')
+      expect(mockGet).toHaveBeenCalledWith('/api/chat/slots/' + encodeURIComponent('test-slot') + '?limit=200&cursor=1')
     })
 
     it('polls at 5000ms interval when idle', async () => {

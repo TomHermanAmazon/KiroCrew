@@ -134,6 +134,23 @@ It preserves the legacy exact `total`, `before`, `next_before`, and `has_more`
 fields. The no-limit route and callers requiring complete history remain on
 `read_messages_chained`. Display redaction remains at `_prepare_messages`; neither
 the sparse index nor page projection stores a redacted or alternate transcript.
+
+A poller of the newest page reads it incrementally (`dashboard/slot_detail_delta.py`;
+its one caller is the app-sdk `ChatEmbed`). A paged read passing `cursor=1` also
+gets `cursor: {from, since, digest}`: the page's first and last row indices and a
+hash of the RENDERED rows in `[from, since)`, so the last row (the folded streaming
+row) is never inside it. Echoing `from` + `since` + `digest` composes the page as
+before, reaching back to `from`, re-renders that span and compares the hash. Equal
+answers only the rows from `since` on, marked `delta: {from, since}`, with
+`next_before` the new window start (the reader drops held rows before it); anything
+else -- a row edited in place, a rewind, a rotation, a changed redaction context,
+a forged digest, a span wider than a page -- answers the full page with no `delta`,
+which replaces what is held. A page whose rendered rows do not line up one-to-one
+with its indices, or whose span holds a row that renders as nothing, issues no
+cursor, so the next read is a plain full one. A cursor read always takes the paged
+route (200 rows when `limit` is omitted), cannot be combined with `before`, and a
+malformed triple is `400 invalid_query_params`. The server render work is that of
+a full page; what shrinks is the payload and the reader's merge.
 When a chain member after the first has rotated-archive segments, the archived
 block sits between rows the page serves, so slot detail serves that page through
 `read_messages_chained_full` rather than leaving the block unreachable. A
