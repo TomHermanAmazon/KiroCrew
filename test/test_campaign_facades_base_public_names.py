@@ -385,6 +385,24 @@ _BASE_PUBLIC_NAMES: dict[str, frozenset[str]] = {
         voice_runtime_workspace_conflict warm_backend wrap_argv wrap_argv_async
         wrapped_by_crew_sandbox
         """.split()),
+    "kiro_crew.instances.ssh_tunnel_manager": frozenset("""
+        CONNECTION_METHODS DEFAULT_TUNNEL_BASE_PORT DiagnosisResult FARGATE_HEALTH_PATH
+        FARGATE_TURN_PATH HopPortGuard HopRetiredError Instance InstanceDisabledError
+        InstancesRegistry LENT_HOP_TTL_CAP MAX_VIA_HOPS PHASE_RESTARTING PHASE_VERIFYING
+        PROXY_TOOL_MISSING_SIGNALS PortAllocator ProxyRequestError
+        REMOTE_UPDATE_TIMEOUT_SECS REMOTE_UPDATE_VERIFY_INTERVAL_SECS
+        REMOTE_UPDATE_VERIFY_SECS RemoteUpdateJob RemoteUpdateJobs SSM_TRANSPORT_METHODS
+        STATE_SUCCEEDED STATE_UNCHANGED STATE_UNVERIFIED SshTunnelManager SshValidationError
+        SsmValidationError TokenMintError TunnelState TunnelStatus
+        UnsupportedConnectionMethodError ancestor_ids clean_version cloud_ssm descendant_ids
+        diagnose_instance diagnose_instance_fargate diagnose_instance_ssm gateway_id
+        is_headless_provisioner live logger mint_remote_token mint_remote_token_ssm
+        platform_compat proxy_tool_missing_message redact run_remote_kirocrew
+        run_remote_kirocrew_ssm sel sel_hmac_key_path split_ecs_target ssh_spawn_argv_env
+        tool_spawn_env ttl_to_seconds validate_aws_profile validate_aws_region
+        validate_remote_bin validate_ssh_host validate_ssm_run_as validate_ssm_target
+        validate_ttl
+        """.split()),
 }
 
 #: Facade -> ``{name: module holding it}`` for each base name the facade re-binds by import.
@@ -584,6 +602,18 @@ _REBOUND: dict[str, dict[str, str]] = {
         "sandbox_mount_sweep": "kiro_crew",
         "sandbox_plan": "kiro_crew",
         "sandbox_seatbelt": "kiro_crew",
+    },
+    "kiro_crew.instances.ssh_tunnel_manager": {
+        "PortAllocator": "kiro_crew.instances.port_allocator",
+        "diagnose_instance": "kiro_crew.instances.diagnostics",
+        "gateway_id": "kiro_crew.gateway_identity",
+        "live": "kiro_crew.config",
+        "mint_remote_token": "kiro_crew.instances.token_mint",
+        "mint_remote_token_ssm": "kiro_crew.instances.ssm_token_mint",
+        "platform_compat": "kiro_crew",
+        "run_remote_kirocrew": "kiro_crew.instances.token_mint",
+        "run_remote_kirocrew_ssm": "kiro_crew.instances.ssm_token_mint",
+        "sel": "kiro_crew.sel",
     },
 }
 
