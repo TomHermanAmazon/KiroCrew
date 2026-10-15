@@ -42,7 +42,7 @@ from kiro_crew.apps.builtins.auto_research.handlers import (
     write_guidance,
     write_status,
 )
-from kiro_crew.testing.wait import async_wait_until
+from kiro_crew.testing.wait import async_wait_until, await_until, default_timeout
 
 
 @pytest.fixture(autouse=True)
@@ -2488,7 +2488,7 @@ class TestWatchdogStopTombstone:
 
         def _persist(_cid, _status, **_kwargs):
             status_write_started.set()
-            assert release_status_write.wait(timeout=5)
+            assert release_status_write.wait(default_timeout())
             raise OSError("status store unavailable")
 
         monkeypatch.setattr(h, "update_campaign_status", _persist)
@@ -2505,8 +2505,11 @@ class TestWatchdogStopTombstone:
 
         task.cancel()
         release_status_write.set()
+        # The settle runs real durable work after the cancel (a SQLite open and
+        # schema check off the loop); on a loaded hosted Windows runner that takes
+        # seconds, so the wait is the lost-run bound, not a number.
         with pytest.raises(asyncio.CancelledError):
-            await asyncio.wait_for(task, timeout=5)
+            await await_until(task, what="the cancelled settlement finishing")
 
         # A non-terminal campaign keeps its loop so restart can retry settling.
         assert svc.get_by_slot(f"research-{cid}") is loop
@@ -2543,7 +2546,7 @@ class TestWatchdogStopTombstone:
 
         def _persist(_cid, _status, **_kwargs):
             status_write_started.set()
-            assert release_status_write.wait(timeout=5)
+            assert release_status_write.wait(default_timeout())
             raise OSError("status store unavailable")
 
         monkeypatch.setattr(h, "update_campaign_status", _persist)
@@ -2563,7 +2566,7 @@ class TestWatchdogStopTombstone:
             release_status_write.set()
             with caplog.at_level(logging.ERROR, logger=h.__name__):
                 with pytest.raises(asyncio.CancelledError):
-                    await asyncio.wait_for(task, timeout=5)
+                    await await_until(task, what="the cancelled settlement finishing")
 
             failure_records = [
                 r

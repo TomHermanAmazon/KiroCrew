@@ -15,6 +15,7 @@ from autonudge_helpers import _owner_dashboard_identity
 
 from kiro_crew import autonudge as _an
 from kiro_crew.autonudge import AutoNudgeService, NudgeLoop
+from kiro_crew.testing.wait import await_until, default_timeout
 
 
 class TestAutonudgeDisabledSettingLink:
@@ -1307,7 +1308,7 @@ class TestPersistenceIsOffLoopAndOrdered:
         def _slow_write(payload):
             order.append("write-start")
             loop.call_soon_threadsafe(entered.set)
-            if not release.wait(2.0):
+            if not release.wait(default_timeout()):
                 raise AssertionError("test did not release the writer")
             real_write(payload)
             order.append("write-done")
@@ -1322,7 +1323,7 @@ class TestPersistenceIsOffLoopAndOrdered:
 
         remover = asyncio.create_task(_remove())
         try:
-            await asyncio.wait_for(entered.wait(), timeout=1.0)
+            await await_until(entered, what="the removal reaching its state write")
             remover.cancel()
             # Deliver cancellation without spending the writer's deadline asleep.
             await asyncio.sleep(0)
@@ -1330,8 +1331,11 @@ class TestPersistenceIsOffLoopAndOrdered:
             assert not remover.done(), "cancellation escaped before the write settled"
         finally:
             release.set()
+            # The real write (an fsync) still runs after the release; on a loaded
+            # hosted Windows runner it takes seconds, so the wait is the lost-run
+            # bound, not a number.
             with pytest.raises(asyncio.CancelledError):
-                await asyncio.wait_for(remover, timeout=2.0)
+                await await_until(remover, what="the cancelled removal finishing")
 
         assert order == ["write-start", "write-done"], order
 
