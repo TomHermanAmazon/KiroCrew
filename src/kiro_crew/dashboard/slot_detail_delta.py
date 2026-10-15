@@ -6,23 +6,25 @@ for what may have changed:
 
 * A paged read that passes ``cursor=1`` gets ``cursor: {from, since, digest}``
   back. ``from`` is the absolute row index of the page's first row, ``since`` the
-  index of its last row, and ``digest`` a hash of the rendered rows in
-  ``[from, since)`` exactly as they were served.
+  index of its last row, and ``digest`` a digest of the rows in ``[from, since)``.
 * The next read passes those three values back (``from``, ``since``, ``digest``
-  query parameters). The server composes the page as before, renders the rows in
-  ``[from, since)`` again and compares their hash. Equal means the reader's copy
+  query parameters). The server composes the page as before and compares the
+  digest of ``[from, since)`` again. Equal means the reader's copy
   of those rows is current, so the response carries only rows from ``since`` on,
   echoed as ``delta: {from, since}``. Anything else -- a row edited in place
   (an approval resolved, a card patched), a rewind, a rotation, a different
   redaction context -- fails the comparison and the response is the full page,
   with no ``delta``, which the reader takes as a replacement.
 
-The last row is never inside the hashed span: the folded streaming row changes on
-every chunk, so it is always re-sent. The hash covers the rendered output, not
-the stored rows, so anything that changes what a reader would see changes it.
-The digest is an integrity check, not a secret: a reader that forges one only
-corrupts its own copy, and every row it is served is rendered and redacted as on
-a full read.
+The last row is never inside the span: the folded streaming row changes on every
+chunk, so it is always re-sent. The digest is built from each row's render-memo
+identity (``wire_render.prepare_message_rows``): a keyed digest of the whole
+stored row plus the redaction context, which is exactly what the render memo
+trusts to mean "renders the same". A row with no identity (a streaming chunk, an
+OAuth row, anything in an owner-view scope) issues no cursor over it. The digest
+is never a hash of display text, and it is an integrity check, not a secret: a
+reader that forges one only corrupts its own copy, and every row it is served is
+rendered and redacted as on a full read.
 """
 
 from __future__ import annotations
@@ -33,10 +35,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-# Matches the slot-detail handler's ceiling (``chat_utils.SLOT_DETAIL_MAX_LIMIT``):
-# a reader's held page is never wider than one page, so a span wider than this is
-# not a cursor this server issued. Such a request is answered with a full page.
-DELTA_MAX_SPAN = 500
+# A reader's held page is never wider than the handler's page ceiling, so a span
+# wider than it is not a cursor this server issued; it is answered with a full page.
+from kiro_crew.dashboard.chat_utils import SLOT_DETAIL_MAX_LIMIT as DELTA_MAX_SPAN
+
 _DIGEST_RE = re.compile(r"[0-9a-f]{32}")
 
 
@@ -100,18 +102,31 @@ def read_limit(window: int, cursor: DeltaCursor | None) -> int:
     return window + (cursor.since - cursor.start)
 
 
-def span_digest(fragments: Sequence[str], start: int, since: int) -> str:
-    """Hash of the rendered rows ``[start, since)``, bound to their position."""
+def render_from(page_start: int, total: int, window: int, cursor: DeltaCursor | None) -> int:
+    """The first composed row a cursor-mode response renders.
+
+    The read reaches back to the cursor's ``from`` only so the span can be
+    checked; rows older than both that span and the new window are neither
+    hashed nor served, so they are not rendered either. Rendering stays about
+    one page plus the rows that arrived since the reader's last poll.
+    """
+    first = total - window if cursor is None else min(cursor.start, total - window)
+    return max(page_start, first)
+
+
+def span_digest(identities: Sequence[bytes], start: int, since: int) -> str:
+    """Digest of the row identities ``[start, since)``, bound to their position."""
     h = hashlib.blake2b(digest_size=16)
     h.update(f"{start}:{since}\n".encode("ascii"))
-    for fragment in fragments:
-        h.update(fragment.encode("utf-8"))
-        h.update(b"\x1e")
+    for identity in identities:
+        h.update(len(identity).to_bytes(4, "big"))
+        h.update(identity)
     return h.hexdigest()
 
 
 def plan_page(
     fragments: Sequence[str | None],
+    identities: Sequence[bytes | None],
     *,
     page_start: int,
     total: int,
@@ -122,13 +137,14 @@ def plan_page(
 
     *fragments* are the page's rendered rows, one per collapsed row starting at
     absolute index *page_start*; ``None`` is a row that renders as nothing (an
-    empty streaming run). *window* is the reader's page size.
+    empty streaming run). *identities* are the same rows' identities, ``None``
+    where none vouches for the render. *window* is the reader's page size.
 
     When the fragments do not line up one-to-one with ``[page_start, total)`` no
     position can be trusted: the whole composed page is served as a replacement
     and no cursor is issued, so the reader's next read is a plain full one.
     """
-    if len(fragments) != total - page_start:
+    if len(fragments) != total - page_start or len(identities) != len(fragments):
         return PagePlan(
             fragments=[f for f in fragments if f is not None],
             next_before=page_start,
@@ -137,9 +153,11 @@ def plan_page(
             cursor=None,
         )
 
-    def _span(a: int, b: int) -> list[str] | None:
-        seg = fragments[a - page_start : b - page_start]
-        return None if any(f is None for f in seg) else [f for f in seg if f is not None]
+    def _span(a: int, b: int) -> list[bytes] | None:
+        seg = identities[a - page_start : b - page_start]
+        if any(i is None or fragments[a - page_start + k] is None for k, i in enumerate(seg)):
+            return None
+        return [i for i in seg if i is not None]
 
     new_from = max(page_start, total - window)
     applied = False

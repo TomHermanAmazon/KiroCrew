@@ -49,7 +49,9 @@ describe('chat-core transcript contract', () => {
   })
 
   it('ChatEmbed polls a bounded page and pages earlier history through the transcript bar', () => {
-    expect(HOSTS.ChatEmbed).toContain("'?limit=' + limit")
+    // The read path is built by the incremental-read helper, still bounded by `limit`.
+    expect(HOSTS.ChatEmbed).toContain('api.get<ChatSlotData>(embedReadPath(key, lim, sent))')
+    expect(read('../app-sdk/embedIncrementalRead.ts')).toContain("'?limit=' + limit")
     expect(HOSTS.ChatEmbed).toContain('earlier: { hasMore: canWiden')
     // A rejected widen keeps the settled page on screen and offers a retry.
     expect(HOSTS.ChatEmbed).toContain('const shown = slotData ?? settled')

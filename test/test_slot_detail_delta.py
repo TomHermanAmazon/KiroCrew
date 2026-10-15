@@ -100,6 +100,58 @@ class TestCursorReads:
         assert data["next_before"] == 50
 
     @pytest.mark.asyncio
+    async def test_assistant_and_tool_rows_hash_the_same_on_every_poll(self, tmp_path, monkeypatch):
+        """Rows a running turn writes must not churn the hash, or every poll is a full page."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        slot = state.get_or_create_slot("t")
+        slot.append("user", "go")
+        slot.append("assistant", "## Plan\n\n**bold** with https://example.com/x")
+        slot.append("tool", "✅ fs_read", "msg msg-tool", meta={"tool_call_id": "call-A"})
+        slot.append("assistant", "done")
+        slot.drain()
+        async with TestClient(TestServer(_make_app(state))) as client:
+            first = await (await client.get("/api/chat/slots/t?limit=10&cursor=1")).json()
+            slot.append("assistant", "more")
+            slot.drain()
+            nxt = await (
+                await client.get(f"/api/chat/slots/t?limit=10&{_echo(first['cursor'])}")
+            ).json()
+        assert nxt.get("delta") == {
+            "from": first["cursor"]["from"],
+            "since": first["cursor"]["since"],
+        }
+        assert [m["content"] for m in nxt["messages"]] == ["done", "more"]
+
+    @pytest.mark.asyncio
+    async def test_a_cursor_read_renders_about_one_page(self, tmp_path, monkeypatch):
+        """Rows read only to reach the span are not rendered."""
+        from kiro_crew.dashboard import wire_render
+
+        state, slot = _state(tmp_path, monkeypatch, "r", 60)
+        rendered: list[int] = []
+        real = wire_render.prepare_message_rows
+
+        def _spy(messages, *a, **kw):
+            rendered.append(len(messages))
+            return real(messages, *a, **kw)
+
+        monkeypatch.setattr(wire_render, "prepare_message_rows", _spy)
+        async with TestClient(TestServer(_make_app(state))) as client:
+            first = await (await client.get("/api/chat/slots/r?limit=10&cursor=1")).json()
+            for i in range(60, 62):
+                state.conversation_log.append("dashboard:r", "user", f"msg {i}")
+                slot.append("user", f"msg {i}")
+            slot.drain()
+            nxt = await (
+                await client.get(f"/api/chat/slots/r?limit=10&{_echo(first['cursor'])}")
+            ).json()
+        assert nxt["delta"] is not None
+        # The span starts at 50; the new window at 52: rows 50..61 are rendered,
+        # not the 19 rows the read composed to reach the span.
+        assert rendered == [10, 12]
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "query",
         [
@@ -119,27 +171,45 @@ class TestCursorReads:
 
 
 class TestPlanPage:
+    @staticmethod
+    def _ids(fragments):
+        return [None if f is None else f.encode() for f in fragments]
+
     def test_misaligned_fragments_serve_the_page_with_no_cursor(self):
-        plan = plan_page(["a", "b"], page_start=0, total=3, window=10, cursor=None)
+        plan = plan_page(
+            ["a", "b"], self._ids(["a", "b"]), page_start=0, total=3, window=10, cursor=None
+        )
         assert plan.fragments == ["a", "b"] and plan.cursor is None and plan.delta is None
 
     def test_a_dropped_row_inside_the_span_issues_no_cursor(self):
-        plan = plan_page(["a", None, "c"], page_start=0, total=3, window=10, cursor=None)
+        frags = ["a", None, "c"]
+        plan = plan_page(frags, self._ids(frags), page_start=0, total=3, window=10, cursor=None)
         assert plan.cursor is None
         assert plan.fragments == ["a", "c"]
 
+    def test_a_row_without_identity_inside_the_span_issues_no_cursor(self):
+        plan = plan_page(
+            ["a", "b", "c"], [b"a", None, b"c"], page_start=0, total=3, window=10, cursor=None
+        )
+        assert plan.cursor is None and plan.fragments == ["a", "b", "c"]
+
     def test_a_dropped_last_row_still_issues_a_cursor(self):
-        plan = plan_page(["a", "b", None], page_start=0, total=3, window=10, cursor=None)
-        assert plan.cursor == {"from": 0, "since": 2, "digest": span_digest(["a", "b"], 0, 2)}
+        frags = ["a", "b", None]
+        plan = plan_page(frags, self._ids(frags), page_start=0, total=3, window=10, cursor=None)
+        assert plan.cursor == {"from": 0, "since": 2, "digest": span_digest([b"a", b"b"], 0, 2)}
 
     def test_the_digest_is_bound_to_position(self):
-        assert span_digest(["a"], 0, 1) != span_digest(["a"], 1, 2)
+        assert span_digest([b"a"], 0, 1) != span_digest([b"a"], 1, 2)
+
+    def test_the_digest_frames_each_identity(self):
+        assert span_digest([b"ab", b"c"], 0, 2) != span_digest([b"a", b"bc"], 0, 2)
 
     def test_an_empty_session_has_a_cursor_too(self):
-        plan = plan_page([], page_start=0, total=0, window=10, cursor=None)
+        plan = plan_page([], [], page_start=0, total=0, window=10, cursor=None)
         assert plan.cursor is not None and plan.cursor["since"] == 0
         nxt = plan_page(
             ["a"],
+            [b"a"],
             page_start=0,
             total=1,
             window=10,
@@ -148,8 +218,8 @@ class TestPlanPage:
         assert nxt.delta == {"from": 0, "since": 0} and nxt.fragments == ["a"]
 
     def test_a_cursor_behind_the_composed_page_is_a_full_page(self):
-        cursor = DeltaCursor(0, 2, span_digest(["a", "b"], 0, 2))
-        plan = plan_page(["b", "c"], page_start=1, total=3, window=2, cursor=cursor)
+        cursor = DeltaCursor(0, 2, span_digest([b"a", b"b"], 0, 2))
+        plan = plan_page(["b", "c"], [b"b", b"c"], page_start=1, total=3, window=2, cursor=cursor)
         assert plan.delta is None and plan.fragments == ["b", "c"]
 
     def test_parse_requires_all_three(self):
@@ -157,3 +227,64 @@ class TestPlanPage:
         assert parse_delta_query({"cursor": "1"}) == (None, True)
         with pytest.raises(DeltaQueryError):
             parse_delta_query({"from": "1", "digest": "0" * 32})
+
+
+class TestRowIdentities:
+    def test_identity_tracks_the_stored_row_not_the_object(self):
+        from kiro_crew.dashboard.wire_render import prepare_message_rows
+
+        rows = [{"role": "assistant", "content": "x", "cls": "msg msg-a"}]
+        _, first = prepare_message_rows(rows, False, live_child="")
+        _, again = prepare_message_rows([dict(rows[0])], False, live_child="")
+        _, edited = prepare_message_rows([{**rows[0], "content": "y"}], False, live_child="")
+        assert first == again and first[0] is not None
+        assert edited != first
+
+    def test_oauth_and_chunk_rows_have_no_identity(self):
+        from kiro_crew.dashboard.wire_render import prepare_message_rows
+
+        rows = [
+            {"role": "mcp_oauth", "content": "sign in", "cls": "msg", "meta": {}},
+            {"role": "chunk", "content": "partial", "cls": "msg"},
+        ]
+        _, ids = prepare_message_rows(rows, True, live_child="")
+        assert ids == [None, None]
+
+    def test_owner_view_rows_have_no_identity(self, monkeypatch):
+        from kiro_crew.dashboard import wire_render
+
+        monkeypatch.setattr(wire_render, "credential_pass_bypassed", lambda: True)
+        _, ids = wire_render.prepare_message_rows(
+            [{"role": "assistant", "content": "x", "cls": "msg msg-a"}], False, live_child=""
+        )
+        assert ids == [None]
+
+    @pytest.mark.parametrize("use_memo", [True, False])
+    def test_an_edit_mid_render_cannot_pair_a_fragment_with_another_rows_identity(
+        self, monkeypatch, use_memo
+    ):
+        """The event loop edits rows in place while the worker thread renders them."""
+        from kiro_crew.dashboard import wire_render
+
+        wire_render.clear_render_memo()
+        live = {"role": "assistant", "content": "before", "cls": "msg msg-a"}
+        real = wire_render._render_row
+
+        def _render_then_edit(m, running, live_child):
+            out = real(m, running, live_child)
+            live["content"] = "after"
+            return out
+
+        monkeypatch.setattr(wire_render, "_render_row", _render_then_edit)
+        fragments, ids = wire_render.prepare_message_rows(
+            [live], False, live_child="", use_memo=use_memo
+        )
+        monkeypatch.setattr(wire_render, "_render_row", real)
+        _, before_ids = wire_render.prepare_message_rows(
+            [{"role": "assistant", "content": "before", "cls": "msg msg-a"}],
+            False,
+            live_child="",
+            use_memo=use_memo,
+        )
+        assert "before" in fragments[0]
+        assert ids == before_ids

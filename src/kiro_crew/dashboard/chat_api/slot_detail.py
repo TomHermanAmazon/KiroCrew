@@ -1304,15 +1304,18 @@ async def api_chat_slot_detail(request: web.Request) -> web.Response:
             if cursor_mode:
                 # Row by row, so a position in the page can be checked against
                 # the reader's cursor and only the rows after it sent.
+                first = slot_detail_delta.render_from(next_before, total, limit, delta_cursor)
+                fragments, identities = wire_render.prepare_message_rows(
+                    messages[first - next_before :],
+                    running,
+                    live_child=live_child,
+                    workspace=workspace,
+                    use_memo=use_memo,
+                )
                 plan = slot_detail_delta.plan_page(
-                    wire_render.prepare_message_fragments(
-                        messages,
-                        running,
-                        live_child=live_child,
-                        workspace=workspace,
-                        use_memo=use_memo,
-                    ),
-                    page_start=next_before,
+                    fragments,
+                    identities,
+                    page_start=first,
                     total=total,
                     window=limit,
                     cursor=delta_cursor,

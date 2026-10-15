@@ -197,39 +197,72 @@ def prepare_messages_json(
     Same arguments and the same contract as ``chat_utils._prepare_messages``;
     the result is the JSON array text instead of the list.
     """
-    parts = prepare_message_fragments(messages, running, live_child=live_child, workspace=workspace)
+    parts, _ = prepare_message_rows(messages, running, live_child=live_child, workspace=workspace)
     return "[" + ", ".join(f for f in parts if f is not None) + "]"
 
 
-def prepare_message_fragments(
+def prepare_message_rows(
     messages: list[dict],
     running: bool,
     *,
     live_child: str,
     workspace: str | None = None,
     use_memo: bool = True,
-) -> list[str | None]:
-    """Each collapsed row's serialized render, in order, ``None`` where it renders as nothing.
+) -> tuple[list[str | None], list[bytes | None]]:
+    """``(fragments, identities)``: each collapsed row's render and what it was rendered from.
 
     One entry per row of ``_collapse_wire_rows(messages)``, so a position in the
-    list is a position in the page. ``use_memo=False`` renders every row afresh;
-    either way the joined non-``None`` entries are the text
-    :func:`prepare_messages_json` returns.
+    lists is a position in the page. ``fragments[i]`` is row *i*'s serialized
+    render, ``None`` where it renders as nothing; the joined non-``None`` entries
+    are the text :func:`prepare_messages_json` returns. ``use_memo=False`` renders
+    every row afresh.
+
+    ``identities[i]`` is a keyed digest of the exact source row the fragment was
+    rendered from, plus the redaction context and the running flag, so two rows
+    with equal identities render the same. Both come from ONE serialization of the
+    row: the render reads the decoded copy, so an edit the event loop makes to the
+    live row mid-render can never pair one row's fragment with another row's
+    identity. ``None`` where no identity can vouch for the render: a streaming
+    chunk, an OAuth row (its render reads live endpoint approvals), a row that is
+    not plain JSON, and every row inside an owner-view scope.
     """
     with _cu.scoped_exempt_hosts(_cu.allowed_hosts_for(workspace)):
-        memo = use_memo and not credential_pass_bypassed()
-        context = _context_digest() if memo else b""
+        bypassed = credential_pass_bypassed()
+        memo = use_memo and not bypassed
+        context = b"" if bypassed else _context_digest()
         parts: list[str | None] = []
+        identities: list[bytes | None] = []
         for m in _cu._collapse_wire_rows(messages):
             # Streaming changes every delta. OAuth URLs depend on revocable
             # endpoint approvals, so neither role is safe or useful to memoize.
             # Compare with ==: a hand-edited row may carry an unhashable role.
             role = m.get("role", "")
-            if not memo or role == "chunk" or role == "mcp_oauth":
+            if bypassed or role == "chunk" or role == "mcp_oauth":
                 parts.append(_render_row(m, running, live_child))
-            else:
-                parts.append(_memo_row(m, running, live_child, context))
-    return parts
+                identities.append(None)
+                continue
+            snap = _snapshot(m)
+            if snap is None:
+                parts.append(_render_row(m, running, live_child))
+                identities.append(None)
+                continue
+            source, digest = snap
+            parts.append(
+                _memo_render(source, digest, running, live_child, context)
+                if memo
+                else _render_row(json.loads(source), running, live_child)
+            )
+            identities.append(digest + context + (b"r" if running else b"-"))
+    return parts, identities
+
+
+def _snapshot(m: dict) -> tuple[str, bytes] | None:
+    """The row serialized once and its keyed digest, or None when it is not plain JSON."""
+    try:
+        source = _dumps(m)
+    except (TypeError, ValueError, RuntimeError, RecursionError):
+        return None
+    return source, hashlib.blake2b(source.encode("ascii"), key=_KEY, digest_size=16).digest()
 
 
 # Fills running in the background, at most this many at once. A read that finds
@@ -287,13 +320,19 @@ def schedule_fill(
     loop.call_later(FILL_DELAY_S, _start)
 
 
-def _memo_row(m: dict, running: bool, live_child: str, context: bytes) -> str | None:
-    try:
-        source = _dumps(m)
-    except (TypeError, ValueError, RuntimeError, RecursionError):
-        return _render_row(m, running, live_child)
-    digest = hashlib.blake2b(source.encode("ascii"), key=_KEY, digest_size=16).digest()
-    key = (digest, context, live_child if m.get("role") == "mcp_oauth" else "")
+def _memo_render(
+    source: str,
+    digest: bytes,
+    running: bool,
+    live_child: str,
+    context: bytes,
+) -> str | None:
+    """The memoized render of the row serialized as *source* (its digest *digest*).
+
+    The key's third slot names a live child only for OAuth rows, which never
+    reach the memo, so it is always empty here.
+    """
+    key = (digest, context, "")
     with _memo_lock:
         hit = _memo.get(key)
         if hit is not None:

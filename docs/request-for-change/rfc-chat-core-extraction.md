@@ -86,11 +86,11 @@ Extract `website/src/chat-core/` as four headless layers plus per-surface chrome
 
 ### 4.1 Pre-publish gate: store-free composer seam (added and ratified 2026-09-05)
 
-**Decision: `ChatEmbed` is host-only for now.** Decoupling `ChatInput` from the store is P3 model-layer work, not a P2 prerequisite. Tracked in **#8651**.
+**Decision (2026-09-05): `ChatEmbed` is host-only for now.** Decoupling `ChatInput` from the store is P3 model-layer work, not a P2 prerequisite. Tracked in **#8651**. *Superseded for `ChatEmbed` by the gate below: it mounts without the store.*
 
 Background: P3's ChatEmbed adoption (#8631, to land after #8599) mounts the real `ChatInput`, whose subtree reads slot state from the dashboard Redux store. That flips `ChatEmbed`'s contract from "no Redux dependency" to "must mount under the host store", and points the `app-sdk → components/providers/hooks` dependency opposite to the standalone-publish plan in `app-sdk/index.ts`. Both in-tree hosts (spec-builder, ops-mission-control) already mount in-host, so nothing breaks today.
 
-**Gate: met (2026-10-11).** The gate was that `@kirocrew/app-sdk` must not publish standalone until `ChatEmbed` mounts without a `Provider`. #8651 closed as delivered on 2026-10-11: #8631 never reached `main`, so `ChatEmbed` never mounted the store-bound `ChatInput`; it mounts the store-free `Composer` root and atoms (P3-f), and `ChatEmbed.composerStoreFree.test.tsx` pins that statically. The standalone publish no longer waits on #8651. What stays true: the dashboard `ChatInput` is still store-bound, so a later change that mounts it inside `ChatEmbed` has to bring the store-free seam with it.
+**Gate: met (2026-10-11).** The gate was that `@kirocrew/app-sdk` must not publish standalone until `ChatEmbed` mounts without a `Provider`. #8651 [closed as delivered](https://github.com/kirodotdev/KiroCrew/issues/8651#issuecomment-6113694017) on 2026-10-11: #8631 never reached `main`, so `ChatEmbed` never mounted the store-bound `ChatInput`; it mounts the store-free `Composer` root and atoms (P3-f), and `ChatEmbed.composerStoreFree.test.tsx` pins that statically. The standalone publish no longer waits on #8651. What stays true: the dashboard `ChatInput` is still store-bound, so a later change that mounts it inside `ChatEmbed` has to bring the store-free seam with it.
 
 ### 4.2 Progress (2026-09-05)
 
