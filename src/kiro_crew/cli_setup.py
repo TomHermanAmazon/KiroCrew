@@ -18,7 +18,6 @@ from slack_sdk.web import WebClient
 
 from kiro_crew import platform_compat, slack_manifest
 from kiro_crew.acp.client import KIRO_CLI_BIN
-from kiro_crew.atomic_write import atomic_write
 from kiro_crew.cli_chat import _ensure_default_agent_in_config
 from kiro_crew.config import KiroCrewConfig
 from kiro_crew.config.loader import (
@@ -44,6 +43,7 @@ from kiro_crew.config.loader import (
 )
 from kiro_crew.constants import MIN_NODE_VERSION, format_node_version
 from kiro_crew.dashboard.urls import _resolve_hostname_bounded
+from kiro_crew.hidden_leaf_staging import EnvStagingRefused, publish_env
 from kiro_crew.sandbox import unavailable_kind
 from kiro_crew.secrets.migrate import _env_lock_path
 from kiro_crew.security import redact
@@ -869,22 +869,20 @@ def _setup_slack_tokens() -> None:
             else:
                 print(f"  ℹ️  Keeping the saved member ID {stale_owner}.\n")
         lines = [f"{k}={v}" for k, v in merged.items()]
-        # atomic_write with restrict_to_owner, not write_text + chmod(0o600): a
-        # bare chmod is a silent no-op for Windows ACLs, and applying any lockdown
-        # only AFTER the tokens are on disk leaves them readable through the
-        # directory's inherited DACL in the failure window. The helper locks its
-        # unique temp file down before any content reaches it and renames only on
-        # success, so the tokens never exist under a wider mode and a failure
-        # leaves the previous .env untouched. restrict_on_error="warn" matches the
-        # .env doctrine (enforce the lockdown, log a warning if it fails) and the
-        # dashboard credential writers: an ACL-refusing host still completes the
-        # wizard instead of aborting after the user typed their tokens.
-        atomic_write(
-            cred_path,
-            env_bom_prefix(cred_path) + "\n".join(lines) + "\n",
-            restrict_to_owner=True,
-            restrict_on_error="warn",
-        )
+        # publish_env, not write_text + chmod(0o600) or a plain atomic_write: a
+        # bare chmod is a silent no-op for Windows ACLs, and a plain atomic_write
+        # stages its temp beside .env, at a name no sandbox mask covers. The
+        # helper stages inside the masked staging directory, locks the temp down
+        # to its owner before any content reaches it and renames only on success,
+        # so the tokens never sit under a wider mode or an unmasked name, and a
+        # failure leaves the previous .env untouched. A refused lockdown of the
+        # temp file warns, as the dashboard credential writers do. An unusable
+        # staging directory refuses the save and prints its fix, not a traceback.
+        try:
+            publish_env(cred_path, env_bom_prefix(cred_path) + "\n".join(lines) + "\n")
+        except EnvStagingRefused as exc:
+            print(f"  ⚠  Nothing was saved. {exc}\n")
+            return
     finally:
         platform_compat.release_lock(lock_fd)
         os.close(lock_fd)

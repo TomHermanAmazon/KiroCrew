@@ -6144,7 +6144,8 @@ class TestConfigDirOverride:
         any lockdown applied only AFTER the tokens are on disk leaves them
         readable through the directory's inherited DACL in the failure window.
         The lockdown therefore lands on the temp file, before any token byte
-        reaches it."""
+        reaches it, and that temp sits in the masked staging directory rather
+        than beside .env."""
         import os as os_mod
 
         import kiro_crew.cli_setup as cs
@@ -6167,11 +6168,12 @@ class TestConfigDirOverride:
 
         monkeypatch.setattr(pc, "restrict_to_owner", _spy)
         cs._setup_slack_tokens()
-        # Locked exactly once, on a file in the credential dir, while it was
-        # still empty of tokens.
-        assert seen == [(tmp_path, False)]
+        # Locked exactly once, on a file in the masked staging directory, while
+        # it was still empty of tokens.
+        assert seen == [(tmp_path / "auth-store-staging", False)]
         assert "xoxb-test" in env_file.read_text(encoding="utf-8")
         assert not list(tmp_path.glob("*.tmp"))  # no temp residue
+        assert not list((tmp_path / "auth-store-staging").iterdir())
         if os_mod.name == "posix":
             assert env_file.stat().st_mode & 0o777 == 0o600
 

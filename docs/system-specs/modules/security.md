@@ -403,12 +403,20 @@ stores — `token_signing.key` and `refresh_chains.json` — publish through
 `auth-store-staging`, and so does every other gateway-written hidden FILE leaf in the
 data-home root that would otherwise stage beside itself with `atomic_write`: the browser
 extension token (`playwright-extension-token`) and the Ops Mission Control secret store
-and policy ceiling (`ops_mission_control_secrets.json`, `ops_mission_control_policy.json`).
-Those three go through
+and policy ceiling (`ops_mission_control_secrets.json`, `ops_mission_control_policy.json`),
+and the data home's `.env`, which holds the chat-channel tokens.
+They go through
 `hidden_leaf_staging.publish_through_auth_store_staging`,
 which stages with `atomic_write` inside the validated staging directory, renames onto the
 leaf, removes its staged copy on a failed publish, and refuses (writing nothing) rather
-than falling back to a sibling temp when the directory is unusable.
+than falling back to a sibling temp when the directory is unusable. Every `.env` writer
+(the setup wizard, the dashboard credential saves, the Weixin login, `secrets import`)
+reaches it through `hidden_leaf_staging.publish_env`. An unusable staging directory,
+including a Windows one that cannot be locked to its owner, refuses the save for all of
+them with `EnvStagingRefused`, which the wizard prints and the dashboard and Weixin saves
+answer as a 409 naming the fix. A refused owner-only lockdown of the staged file keeps
+each writer's own answer: the wizard and the dashboard saves warn and publish, and
+`secrets import` raises and also fsyncs.
 `auth-store-staging` is a direct child of the data home that is masked
 (`sandbox._CREW_HIDDEN_LEAVES`), precreated so a sandbox spawned before the first write does
 not watch the directory appear (`_CREW_PRECREATE_HIDDEN_DIR_LEAVES`), and fenced from the

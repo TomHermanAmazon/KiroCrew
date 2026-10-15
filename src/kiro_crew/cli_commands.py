@@ -114,6 +114,7 @@ from kiro_crew.eval.judge import LLMJudge
 from kiro_crew.eval.runner import EvalRunner, format_results, score_by_dimension
 from kiro_crew.eval.scenario import AssertionType, load_scenario, load_scenarios
 from kiro_crew.external_text import external_text_requires_redaction
+from kiro_crew.hidden_leaf_staging import EnvStagingRefused
 from kiro_crew.history import ConversationLog
 from kiro_crew.hooks import safe_read_file
 from kiro_crew.learn import LessonStore
@@ -5214,7 +5215,9 @@ def _handle_secrets(args: argparse.Namespace) -> None:
         # nonzero exit — never an uncaught traceback.
         try:
             report = migrate_env_secrets(dry_run=not args.apply)
-        except MigrationConflictError as exc:
+        except (MigrationConflictError, EnvStagingRefused) as exc:
+            # EnvStagingRefused is an OSError, so it is caught first: the vault is
+            # fine and the message names the staging directory and its fix.
             print(f"error: {exc}", file=sys.stderr)
             sys.exit(1)
         except (OSError, ValueError) as exc:

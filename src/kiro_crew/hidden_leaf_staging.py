@@ -19,7 +19,11 @@ import stat
 from pathlib import Path
 
 from kiro_crew import platform_compat
-from kiro_crew.atomic_write import atomic_write, replace_with_retry
+from kiro_crew.atomic_write import (
+    RestrictErrorPolicy,
+    atomic_write,
+    replace_with_retry,
+)
 
 # The logger these warnings were always emitted under, kept so an operator's log filter
 # (and every test that captures it) still sees them after the move out of token_secret.
@@ -35,7 +39,8 @@ logger = logging.getLogger("kiro_crew.dashboard.token_secret")
 #: Every other gateway-written hidden FILE leaf in the data-home root that is published
 #: with ``atomic_write`` stages here too, through
 #: :func:`publish_through_auth_store_staging`: the browser extension token and
-#: the Ops Mission Control secret store and policy ceiling.
+#: the Ops Mission Control secret store and policy ceiling, and the data home's ``.env``
+#: (through :func:`publish_env`).
 #:
 #: Staging beside either leaf is what this exists to avoid. Both are masked in an agent
 #: sandbox as individual FILES, and a mask covers a PATH rather than an inode, so a temp
@@ -209,10 +214,47 @@ def publish_through_auth_store_staging(path: Path, content: str | bytes) -> None
     file is owner-only, and a lockdown that cannot be applied raises before any byte lands.
     """
     path = Path(path)
-    staging = auth_store_staging_dir(path.parent)
+    _publish_staged(
+        auth_store_staging_dir(path.parent),
+        path,
+        content,
+        restrict_on_error="raise",
+        fsync=False,
+    )
+
+
+def _publish_staged(
+    staging: Path,
+    path: Path,
+    content: str | bytes,
+    *,
+    restrict_on_error: RestrictErrorPolicy,
+    fsync: bool,
+) -> None:
+    """Write *content* into the already-validated *staging* directory, then rename it.
+
+    The publish half of :func:`publish_through_auth_store_staging`, split out so
+    :func:`publish_env` can validate the directory once and answer its refusal itself.
+
+    *restrict_on_error* is the owner-only lockdown policy for the staged FILE only, passed
+    to ``atomic_write``: ``"warn"`` publishes with a warning when that file cannot be
+    locked down, and the file is inside the masked directory either way. It never relaxes
+    the directory validation, which the caller has already passed.
+
+    *fsync* syncs the staged file's data before the rename, as ``atomic_write(fsync=True)``
+    does. Nothing runs after the rename: a step there that raised or was interrupted would
+    report a published file as failed, and a caller that rolls back on failure (the secrets
+    import deletes the vault entries the new ``.env`` references) would strand it.
+    """
     staged = staging / f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}.tmp"
-    atomic_write(staged, content, restrict_to_owner=True, restrict_on_error="raise")
     try:
+        atomic_write(
+            staged,
+            content,
+            fsync=fsync,
+            restrict_to_owner=True,
+            restrict_on_error=restrict_on_error,
+        )
         replace_with_retry(staged, path)
     except BaseException:
         # Nothing was published: drop our candidate so a full copy of the payload does
@@ -222,3 +264,91 @@ def publish_through_auth_store_staging(path: Path, content: str | bytes) -> None
         except OSError:
             pass
         raise
+
+
+def publish_env(
+    path: Path,
+    content: str | bytes,
+    *,
+    restrict_on_error: RestrictErrorPolicy = "warn",
+    fsync: bool = False,
+) -> None:
+    """Atomically replace the data home's ``.env`` with *content*, staged under the mask.
+
+    ``.env`` is a hidden leaf FILE holding chat-channel tokens, so it takes the same
+    staged publish as every other one (:func:`publish_through_auth_store_staging`). Every
+    ``.env`` writer goes through here -- the setup wizard, the dashboard credential saves,
+    the Weixin login and the secrets import -- so they share one staging policy:
+
+    * unusable staging directory: raise :class:`EnvStagingRefused` and write nothing, for
+      every writer. That covers a planted file or symlink at the staging name, a
+      directory another account can write, and, on Windows, a staging directory that
+      cannot be locked to its owner (a host that refuses the DACL, or whose user SID
+      cannot be read). Writing the temp beside ``.env`` instead would put every token at
+      a name no mask covers, which is the exposure this closes, so no policy relaxes it.
+      The one exception type lets each writer answer with the fix the message carries
+      instead of a traceback or a bare 500.
+    * owner-only lockdown failure on the staged FILE, once the directory is usable: each
+      writer keeps its own answer. The default ``"warn"`` lets the wizard or a credential
+      save the user already typed still finish; the temp is inside the masked owner-only
+      directory either way. The secrets import passes ``"raise"`` and ``fsync=True``, as
+      it always has.
+    """
+    path = Path(path)
+    try:
+        staging = auth_store_staging_dir(path.parent)
+    except OSError as exc:
+        # A message of its own: the directory's refusal text is written for the
+        # gateway auth stores (a signing key, a restart), which says nothing true about
+        # a .env save. The original stays chained for the log.
+        raise EnvStagingRefused(exc.errno, _env_staging_refusal(path, exc)) from exc
+    if os.name != "nt" and os.lstat(staging).st_uid != os.getuid():
+        # Another account's directory (left by a run as root, say) passes the mode test
+        # when its owner-only chmod is refused, and the staged write would then fail
+        # with a bare PermissionError instead of this refusal and its fix.
+        raise EnvStagingRefused(
+            errno.EACCES,
+            f"{path} was not changed: Kiro Crew writes it through {staging}, and another "
+            "account owns that directory. Remove it (as the account that created it, "
+            "for example with sudo), then save again.",
+        )
+    _publish_staged(staging, path, content, restrict_on_error=restrict_on_error, fsync=fsync)
+
+
+def _env_staging_refusal(path: Path, exc: OSError) -> str:
+    """The refusal text for a ``.env`` save, with the fix that works for its cause."""
+    staging = path.parent / _AUTH_STORE_STAGING_LEAF
+    head = f"{path} was not changed: Kiro Crew writes it through {staging}"
+    if exc.errno == errno.ENOTDIR:
+        return f"{head}, and something that is not a directory is at that name. Remove it, then save again."
+    if not isinstance(exc, AuthStoreStagingRefused):
+        return f"{head}, which could not be prepared ({exc.strerror or exc}). Fix that, then save again."
+    if os.name == "nt":
+        # Removing the directory does not help here: it is recreated and the same
+        # owner-only lock is refused again, so the fix is the volume or the account.
+        return (
+            f"{head}, and Windows refused to limit that directory to this account. "
+            "Saving anyway would leave the tokens readable by other accounts, so the "
+            "data home must be on a volume where this account can set its own "
+            "permissions (NTFS), or an administrator must grant that, then save again."
+        )
+    # restrict_dir_to_owner already tried chmod 700 and it did not stick: the directory
+    # belongs to another account, or the mount fixes the mode (CIFS, vfat).
+    return (
+        f"{head}, and it stays writable by other accounts after Kiro Crew tried to make it "
+        "owner-only. If another account owns it, remove it; if the data home is on a mount "
+        "that does not keep permission bits, move the data home to one that does. Then "
+        "save again."
+    )
+
+
+class EnvStagingRefused(OSError):
+    """A ``.env`` save was refused because the masked staging directory is unusable.
+
+    Raised by :func:`publish_env` before any byte is written. The message names the
+    directory and the one-step fix, so a writer shows it as it stands: ``str()`` is the
+    message alone, without the ``[Errno N]`` prefix ``OSError`` would add.
+    """
+
+    def __str__(self) -> str:
+        return str(self.strerror)

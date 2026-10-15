@@ -120,7 +120,7 @@ _BASE_NAMES = frozenset("""
         api_teams_activity api_teams_config_get api_teams_config_save
         api_telegram_config_get api_telegram_config_save api_update_message
         api_webex_config_get api_webex_config_save api_wecom_config_get
-        api_wecom_config_save atomic_write backfill_channel_folder
+        api_wecom_config_save backfill_channel_folder
         blocks_request_remote_media browser_cli_install browser_cli_launcher
         browser_cli_token browser_cli_view browser_install_job build_options_blocks
         caller_names_a_missing_slot cast channel_restart_required chunk_for_transport
