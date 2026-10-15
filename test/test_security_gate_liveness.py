@@ -331,7 +331,11 @@ def _url_payload_command(n: int) -> str:
 #: docstring, the runner and opener tables and the redirection and hidden-command
 #: patterns. It only narrows what auto-approves; no deny rule, threshold or pass
 #: moved.
-_PACKAGE_LINE_BUDGET = 29_293
+#:
+#: Raised again, from 29,293, for the write tier's reason-or-None spelling and the
+#: stall wording that names the stalled prefix and the cooldown left: a
+#: stall still refuses everywhere it did; only the words a refused agent reads moved.
+_PACKAGE_LINE_BUDGET = 29_319
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
