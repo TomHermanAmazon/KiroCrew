@@ -4621,12 +4621,14 @@ allow and a committed teardown barrier before it is signalled (see
 [Orphan Sweep Active Set](#orphan-sweep-active-set)). `cleanup_orphaned_session_roots` and
 `cleanup_orphaned_sessions` do not ask the ownership gate: they reclaim entries whose
 owning gateway is dead, and the identity test and arm conditions here are the whole of
-their authority. `cleanup_orphaned_sessions` also reclaims entries whose owning pid is
+their authority. Both also reclaim entries whose owning pid is
 the supervisor an in-app restart through a supervising launcher left as this process's
-ancestor (`platform_compat.is_exec_supervisor_of_this_process`): those rows were filed
-by this gateway's own previous image, and the same identity test and arm conditions
-decide each of them. `cleanup_orphaned_session_roots` still skips them while the
-supervisor lives.
+ancestor (`platform_compat.is_exec_supervisor_of_this_process`, asked once per owner
+pid): those rows were filed by this gateway's own previous image, and the same identity
+test and arm conditions decide each of them. `cleanup_orphaned_session_roots` needs the
+rule as well as the startup sweep, because the startup sweep retains a row whose child
+is still in the spawn grace at boot or whose start token cannot be read then, and the
+periodic sweep is the only one that runs again before the next start.
 
 That gate is per-TOKEN and exact wherever a command line can be read (Linux `/proc`,
 macOS `ps`), never a substring of the whole line: the projected names include
