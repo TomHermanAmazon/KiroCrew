@@ -411,6 +411,12 @@ _BASE_PUBLIC_NAMES: dict[str, frozenset[str]] = {
         resume_takes_tool_search_replay sandbox_init_failure_for_runtime sanitize_sink_text
         servers_exposing_no_tools telemetry_channel_of workspace_cli_settings_lock
         """.split()),
+    "kiro_crew.sel": frozenset("""
+        AWS_KEY_ID_PREFIXES SecurityEvent SecurityEventLog SelChainContention SelVerification
+        atomic_write audit_sources config_dir flush_audit_queue flush_audit_queue_before_hard_exit
+        logger platform_compat sel sel_hmac_key_path sel_is_warm subprocess_executor
+        warm_sel_singleton
+        """.split()),
 }
 
 #: Facade -> ``{name: module holding it}`` for each base name the facade re-binds by import.
@@ -693,6 +699,13 @@ _REBOUND: dict[str, dict[str, str]] = {
         "servers_exposing_no_tools": "kiro_crew.acp.mcp_session_report",
         "telemetry_channel_of": "kiro_crew.messaging.link",
         "workspace_cli_settings_lock": "kiro_crew.workspace_cli_settings",
+    },
+    "kiro_crew.sel": {
+        "AWS_KEY_ID_PREFIXES": "kiro_crew.credential_patterns",
+        "atomic_write": "kiro_crew.atomic_write",
+        "config_dir": "kiro_crew.config.paths",
+        "platform_compat": "kiro_crew",
+        "subprocess_executor": "kiro_crew.executors",
     },
 }
 
