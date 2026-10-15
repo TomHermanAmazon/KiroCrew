@@ -36,6 +36,7 @@ path.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import threading
@@ -510,6 +511,128 @@ def render_package_page(
     if not scripts:
         html = dashboard_frame.fill_bindings_as_text(html, read)
     return dashboard_frame.compose_body(html, read)
+
+
+#: What the script-grant audit calls a page that is staged and has no artifact of its own.
+#: Not a slug the store can produce, so a package of any name keeps its own audit entry.
+_STAGED: Final[str] = "(staged)"
+
+
+def authored_html(package: Mapping[str, Any]) -> str | None:
+    """The page an agent wrote as ``view.html``, or ``None`` for a block layout.
+
+    A block layout has no script of its own, so there is nothing to run.
+    """
+    view = package.get("view")
+    html = view.get("html") if isinstance(view, Mapping) else None
+    return html if isinstance(html, str) and html else None
+
+
+def verify_package_page(
+    slug: str,
+    crew: str,
+    slot: str,
+    package: Mapping[str, Any],
+    deadline: float | None = None,
+) -> dict[str, Any] | None:
+    """Run an authored page once over a SYNTHETIC copy of *crew*'s read; the result in wire form.
+
+    ``None`` when the package draws from blocks. Otherwise the wire form of a
+    :class:`~kiro_crew.dashboard_verify.Verification`, which says ``passed``, ``failed``
+    with each error and where it was thrown, ``timed_out`` or ``skipped`` with the reason.
+
+    The page is staged and no person has approved it, so it is never given the record: the
+    read is taken here exactly as the tab is served it (:meth:`LivePage.arm` over the same
+    manifest, redaction and folds, then disarmed), and ``dashboard_verify`` copies it into
+    a record of the same shape with invented values and runs the page over that. *package*
+    must be CANONICAL, like :func:`package_manifest`'s.
+
+    A page the tab would mount WITHOUT script is not run: an owner whose egress is
+    restricted has asked that the page's script not run at all (the tab's own decision,
+    ``member_dashboard._egress_decision``), so there is nothing to check. The decision is
+    audited in both directions, like the tab's. A session that is not a crewmate (*crew*
+    is empty) has no tab and no owner to ask, so its page is not run.
+
+    The page is checked as the tab is served it: its text goes through the route's own
+    secret filter first (``member_dashboard._template_text_safe``, and the model's strings
+    through ``_manifest_text_safe``), and when that changed the page the result says how many
+    places and where the first is, without saying what was replaced.
+
+    What it returns has crossed ``member_dashboard._page_safe``, the pass the tab's values
+    cross, because a page's errors are text the page chose.
+
+    The cheap tests come first (:func:`~kiro_crew.dashboard_verify.preflight`: not Linux,
+    a check already running, a machine short of memory), so a save that will be skipped
+    reads nothing. *deadline* is the ``time.monotonic()`` instant the check must be over by.
+
+    Blocking (fold reads, a browser start), so a route calls it through
+    ``asyncio.to_thread``. Never raises: a save must not fail because a check could not.
+    """
+    html = authored_html(package)
+    if html is None:
+        return None
+    # Deferred: this module is imported before the socket binds and must not pull in
+    # the browser runner, and `member_dashboard` imports this module (a cycle).
+    from kiro_crew import dashboard_verify
+    from kiro_crew.dashboard.handlers import member_dashboard
+
+    def skipped(reason: str) -> dict[str, Any]:
+        return dashboard_verify.Verification(dashboard_verify.STATUS_SKIPPED, reason=reason).wire()
+
+    if not crew:
+        return skipped("only a crewmate's own page is run, and this session is not a crewmate")
+    reason = dashboard_verify.preflight()
+    if reason:
+        return skipped(reason)
+    try:
+        key = member_dashboard.governance_session_key(slot)
+        decision = member_dashboard._egress_decision(crew, key)
+        member_dashboard._audit_page_script_grant(
+            member=crew, package_slug=_STAGED, version=0, session_key=key, decision=decision
+        )
+        if not decision.granted:
+            return skipped(
+                "the page is shown without script under this crewmate's network policy, so "
+                "its script never runs and there is nothing to check"
+            )
+
+        # THE TEXT THE TAB IS SERVED. The route runs the page's markup and script through
+        # the secret filter before it composes the document, and a script that holds a long
+        # run of letters and digits can come out of it changed and break on the gateway
+        # alone. These are the route's own two functions, so the check cannot drift from
+        # it; `rewrite_note` tells the agent that the page it wrote is not the page it got.
+        shown = member_dashboard._template_text_safe(html)
+        note = dashboard_verify.rewrite_note(html, shown)
+
+        def read_once() -> Mapping[str, Any]:
+            page = LivePage(
+                slug,
+                slot,
+                package,
+                lambda _frame: None,
+                session_unit=member_dashboard._newest_unit(slot),
+                redact=member_dashboard._page_safe,
+            )
+            try:
+                return page.arm()
+            finally:
+                page.disarm()
+
+        verdict = dashboard_verify.verify_page(
+            shown,
+            read_once,
+            model=member_dashboard._manifest_text_safe(package.get("model")),
+            deadline=deadline,
+        )
+        if note:
+            verdict = dataclasses.replace(verdict, notes=(note, *verdict.notes))
+        # REDACTED LIKE EVERY VALUE THE TAB IS SERVED. The page's own script chose the text of
+        # its errors, and it can build a string that no scan of its source saw (two literals
+        # joined at run time), so what goes back to the agent crosses the same recursive pass.
+        return member_dashboard._page_safe(verdict.wire())
+    except Exception:
+        logger.warning("dashboard: the page for %r could not be checked", slug, exc_info=True)
+        return skipped("the check could not run on this machine")
 
 
 def writing_caller(request: Any) -> tuple[str, str]:

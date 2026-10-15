@@ -30,7 +30,37 @@ stage -> preview -> a person approves -> apply
    and it is also the list the controller pushes, so a binding the model does
    not declare is refused at the save and told to you by name. Staging records
    the page and nothing else: it does not go live, it cuts no version, and the
-   controller pushes it no values.
+   controller pushes it no values. The save then RUNS the page once, offline,
+   over a SYNTHETIC copy of your crewmate's current data: the same fields,
+   nesting, list lengths, nulls and types, with invented values (booleans and
+   the schema's fixed words are kept, and an `enum` field shows one of its own
+   labels at random). A key inside a value is kept only if your page spells it
+   out, as a word or in quotes, or the dashboard type catalog lists it for
+   that value, so reach data by the names you write in the page. In the rows
+   of a list read from the crew log, only a row's own keys are kept: the keys
+   of an object nested inside a row are invented. The page never sees the
+   record, so a value quoted in an error is not a real one. The reply carries a `verification`
+   block: `passed`, `failed` with each script error and the `view.html` line and
+   column it was thrown at, `timed_out` when the run hit its time limit, or
+   `skipped` with the reason (no system-installed browser on the machine, for
+   one). Fix a failed page and save again before you tell the person about it.
+   An error that depends on how two invented values compare (a count above its
+   total) may come from the copy; one that depends on a missing field, a null or
+   a wrong type does not. The page is run as the dashboard shows it: the
+   gateway's secret filter rewrites text in a page that looks like a key (a long
+   run of letters and digits can), and when it changed yours the reply says how
+   many places and the line of the first, never what was replaced. A script that
+   depends on such a string breaks on the dashboard and here, and nowhere else;
+   write the string in shorter pieces and join them in code. The run has no
+   network, so a library the page loads
+   from the CDN allowlist is not fetched. A page whose script stops at that
+   library's name (`Chart is not defined`) comes back `skipped`, not `failed`,
+   because the rest of that script did not run; any other error is still
+   `failed`. It checks the first paint only: a refill that arrives later is not
+   exercised. The save waits for the run, which usually takes about a second and
+   never more than about twelve. One page is checked at a time across the gateway,
+   so a save that finds another check running, or a machine short of memory, is
+   `skipped` at once and does not wait.
 2. **Preview.** Show the staged page to the person who will decide on it. A
    preview records nothing, which is what makes "show me" free when the answer
    is no.

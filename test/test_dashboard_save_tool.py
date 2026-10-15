@@ -27,8 +27,15 @@ refuses and asserting the save answers 400 with nothing staged.
 
 from __future__ import annotations
 
+import ast
+import asyncio
 import json
+import re
+import sys
+import threading
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -36,8 +43,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from kiro_crew import platform_compat
 from kiro_crew.artifact_store.dashboard_package import DASHBOARD_KIND, parse_package
 from kiro_crew.dashboard.handlers import agent_panel as routes
+from kiro_crew.testing.wait import async_wait_until, await_until
 
 pytestmark = pytest.mark.asyncio
 
@@ -823,3 +832,1052 @@ def test_the_tool_has_a_registered_argument_schema():
     from kiro_crew.validation import MCP_PANEL_SCHEMAS
 
     assert "dashboard_save" in MCP_PANEL_SCHEMAS
+
+
+# --------------------------------------------------------------------------- #
+# 7. The verification block: an authored page is run once over a synthetic copy
+# --------------------------------------------------------------------------- #
+
+_PAGE = '<span data-dashboard-field="open_prs"></span>\n<script>window.kirocrew.fields.open_prs;</script>'
+
+#: The grammar the artifact store gives a slug (``artifact_store.rules._SLUG_RE``).
+_STORE_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?\Z")
+
+
+def _html_body() -> dict[str, Any]:
+    body = _package_body()
+    body["view"] = {"html": _PAGE}
+    return body
+
+
+def _verdict(status: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "status": status,
+        "data": "synthetic",
+        "errors": [],
+        "reason": "",
+        "notes": [],
+        **extra,
+    }
+
+
+async def test_a_page_written_as_html_comes_back_with_its_verification(monkeypatch, store):
+    """The agent learns what its page raised on a synthetic copy in the save's own reply.
+
+    The runner is stubbed: what this proves is the route's half -- it is asked with the
+    vetted caller's slug, crew and slot and with the CANONICAL package (what an apply
+    would commit), a deadline no later than the check's time limit, its answer reaches
+    the body, and the page stays staged whatever the answer is, so the fix is one more save.
+    """
+    from kiro_crew import dashboard_verify
+    from kiro_crew.artifact_store import dashboard_package
+    from kiro_crew.dashboard.handlers import member_dashboard_fields
+    from kiro_crew.dashboard_templates import instance as instance_store
+
+    asked: dict[str, Any] = {}
+    failed = _verdict(
+        "failed",
+        errors=[{"kind": "exception", "message": "TypeError: x", "line": 2, "column": 8}],
+    )
+
+    def _verify(slug: str, crew: str, slot: str, package: dict[str, Any], deadline=None):
+        asked.update(slug=slug, crew=crew, slot=slot, package=package, deadline=deadline)
+        return failed
+
+    monkeypatch.setattr(member_dashboard_fields, "verify_package_page", _verify)
+    # Decoding and validating an agent-sized package is not work for the event loop.
+    on_the_loop: list[bool] = []
+    real_parse = dashboard_package.parse_package
+
+    def _parse(content: str):
+        on_the_loop.append(threading.current_thread() is threading.main_thread())
+        return real_parse(content)
+
+    monkeypatch.setattr(dashboard_package, "parse_package", _parse)
+
+    async with _client(monkeypatch) as client:
+        resp = await _save(client, _html_body())
+        payload = await resp.json()
+
+    assert resp.status == 200, payload
+    assert payload["verification"] == failed
+    assert (asked["slug"], asked["crew"], asked["slot"]) == (SLUG, CREW, "slot-1")
+    assert asked["package"]["view"] == {"html": _PAGE}
+    assert asked["package"]["bound_to"] == f"crewmate:{SLUG}"
+    # The check is over by one limit, counted from the save and not from the thread's start.
+    assert asked["deadline"] <= time.monotonic() + dashboard_verify.RUN_TIMEOUT_SECONDS
+    assert on_the_loop and not any(on_the_loop), "a package was parsed on the event loop"
+    # STILL STAGED: a failed verdict does not unstage, and nothing is stored.
+    assert instance_store.staged_package_preview(SLUG) is not None
+    assert store.records == {}
+
+
+async def test_a_block_layout_has_no_script_to_run(monkeypatch, store):
+    """``verification`` is null for blocks, and nothing starts to find that out."""
+    from kiro_crew import dashboard_verify
+
+    monkeypatch.setattr(
+        dashboard_verify, "verify_page", lambda *_a, **_k: pytest.fail("ran a block layout")
+    )
+
+    async with _client(monkeypatch) as client:
+        resp = await _save(client, _package_body())
+        payload = await resp.json()
+
+    assert resp.status == 200, payload
+    assert payload["verification"] is None
+
+
+async def test_a_refused_page_is_not_run(monkeypatch, store):
+    """The store's write gate answers first; a page that cannot be stored is not executed."""
+    from kiro_crew.dashboard.handlers import member_dashboard_fields
+
+    monkeypatch.setattr(
+        member_dashboard_fields,
+        "verify_package_page",
+        lambda *_a, **_k: pytest.fail("ran a page the gate refused"),
+    )
+    body = _html_body()
+    body["view"] = {"html": '<span data-dashboard-field="undeclared"></span>'}
+
+    async with _client(monkeypatch) as client:
+        resp = await _save(client, body)
+        payload = await resp.json()
+
+    assert resp.status == 400
+    assert payload["code"] == "invalid_package"
+
+
+class _FakeLivePage:
+    """Stands in for ``LivePage``: records how it is built, armed and disarmed."""
+
+    built: list[dict[str, Any]] = []
+    calls: list[str] = []
+    fail_on_arm = False
+    #: What a read of the crewmate's data gives.
+    record: dict[str, Any] = {"fields": {"open_prs": 4}, "version": 1}
+
+    def __init__(self, slug: str, slot: str, package: dict[str, Any], send: Any, **kw: Any):
+        type(self).built.append({"slug": slug, "slot": slot, "package": package, **kw})
+
+    def arm(self) -> dict[str, Any]:
+        type(self).calls.append("arm")
+        if type(self).fail_on_arm:
+            raise OSError("fold unreadable")
+        return type(self).record
+
+    def disarm(self) -> None:
+        type(self).calls.append("disarm")
+
+
+@pytest.fixture
+def tab_stubs(monkeypatch):
+    """What the tab's own side of the check decides, stubbed: the live page, the script
+    grant and its audit row. The runner is left as it is."""
+    from kiro_crew.dashboard.handlers import member_dashboard, member_dashboard_fields
+
+    _FakeLivePage.built, _FakeLivePage.calls, _FakeLivePage.fail_on_arm = [], [], False
+    monkeypatch.setattr(_FakeLivePage, "record", {"fields": {"open_prs": 4}, "version": 1})
+    audited: list[dict[str, Any]] = []
+    granted = member_dashboard._EgressDecision(True, "policy", "no_restriction")
+    monkeypatch.setattr(member_dashboard_fields, "LivePage", _FakeLivePage)
+    monkeypatch.setattr(member_dashboard, "_egress_decision", lambda *_a: granted)
+    monkeypatch.setattr(
+        member_dashboard, "_audit_page_script_grant", lambda **kw: audited.append(kw)
+    )
+    monkeypatch.setattr(member_dashboard, "_newest_unit", lambda _slot: "unit-9")
+    return SimpleNamespace(module=member_dashboard_fields, audited=audited)
+
+
+@pytest.fixture
+def glue(tab_stubs, monkeypatch):
+    """``verify_package_page`` with the live page, the grant and the runner stubbed.
+
+    The runner stub asks for the record the way the real one does: once it is called, and
+    by calling the function it was handed. ``ran`` keeps what it was given and whether the
+    live page had been built by the time it was asked.
+    """
+    from kiro_crew import dashboard_verify
+
+    ran: list[SimpleNamespace] = []
+    # The cheap tests are the host's (not Linux, a check running, no memory); these tests
+    # are about what the glue does once they pass.
+    monkeypatch.setattr(dashboard_verify, "preflight", lambda: "")
+
+    def _verify(html: str, read: Any, **kw: Any):
+        built_before = len(_FakeLivePage.built)
+        record = read() if callable(read) else read
+        ran.append(
+            SimpleNamespace(
+                html=html, record=record, lazy=callable(read), built_before=built_before, **kw
+            )
+        )
+        return dashboard_verify.Verification(
+            dashboard_verify.STATUS_PASSED, data=dashboard_verify.DATA_SYNTHETIC
+        )
+
+    monkeypatch.setattr(dashboard_verify, "verify_page", _verify)
+    tab_stubs.ran = ran
+    return tab_stubs
+
+
+@pytest.fixture
+def browser(monkeypatch, tmp_path):
+    """The real runner over a FAKE browser: a function that makes one with a scenario.
+
+    The host's memory, its browser and its Python are the test's; the settle time is short,
+    nothing is remembered of an earlier run, and the copy is made from a fixed seed so the
+    document a browser is handed can be worked out.
+    """
+    import random
+
+    from fake_devtools_browser import FakeBrowser
+
+    from kiro_crew import dashboard_synth, dashboard_verify
+
+    monkeypatch.setattr(platform_compat, "host_available_mib", lambda: 1 << 20)
+    monkeypatch.setattr(dashboard_verify, "find_launcher_python", lambda: sys.executable)
+    monkeypatch.setattr(dashboard_verify, "_SETTLE_SECONDS", 0.2)
+    monkeypatch.setattr(dashboard_verify, "_UNUSABLE", {})
+    monkeypatch.setattr(dashboard_synth, "_fresh_rng", lambda: random.Random(1234))
+    # A test that holds a browser ends it by releasing it, so no real limit may end the check
+    # first, however slow the machine is. A test about a limit sets its own.
+    monkeypatch.setattr(dashboard_verify, "RUN_TIMEOUT_SECONDS", 3600.0)
+    monkeypatch.setattr(dashboard_verify, "REPLY_SECONDS", 3700.0)
+
+    def _make(**scenario: Any) -> FakeBrowser:
+        fake = FakeBrowser(tmp_path, **scenario)
+        monkeypatch.setattr(dashboard_verify, "find_browser", lambda: str(fake.executable))
+        return fake
+
+    return _make
+
+
+_PACKAGE = {"view": {"html": _PAGE}, "model": {"types": {}}, "theme": {"tokens": {}}}
+
+
+def test_the_page_is_run_over_the_read_the_tab_is_served(glue):
+    """The first paint's read: the tab's redaction, the crewmate's slot, then disarmed.
+
+    The runner is handed a function, not the record: the read is taken once the runner
+    holds the check's slot, so a save that is turned away reads nothing, and the runner
+    is the only place the record goes.
+    """
+    from kiro_crew.dashboard.handlers import member_dashboard
+
+    out = glue.module.verify_package_page(SLUG, CREW, "slot-1", _PACKAGE, 123.5)
+
+    assert out is not None and out["status"] == "passed" and out["data"] == "synthetic"
+    (ran,) = glue.ran
+    assert ran.html == _PAGE
+    assert ran.lazy and ran.built_before == 0, "the record was read before the runner asked"
+    assert ran.record == {"fields": {"open_prs": 4}, "version": 1}
+    # The package's own model tells the copy which words to keep and which maps are keyed.
+    assert ran.model == _PACKAGE["model"]
+    assert ran.deadline == 123.5
+    (built,) = _FakeLivePage.built
+    assert (built["slug"], built["slot"], built["session_unit"]) == (SLUG, "slot-1", "unit-9")
+    assert built["redact"] is member_dashboard._page_safe
+    assert _FakeLivePage.calls == ["arm", "disarm"]
+    # Running the script here is the tab's own authorization, so it leaves the tab's own row.
+    (row,) = glue.audited
+    assert (row["member"], row["package_slug"], row["version"]) == (CREW, "(staged)", 0)
+    assert row["decision"].granted is True
+    # A name the store cannot give a package, so a real package keeps its own entry.
+    assert not _STORE_SLUG.match(row["package_slug"])
+
+
+#: Assembled at runtime, like the credential-shaped values in ``test_member_dashboard_routes``:
+#: a literal of this shape in the diff is a finding against the PR whatever the code
+#: around it is for. Do not join these back up.
+_KEY = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+
+
+def _keyed_package() -> dict[str, Any]:
+    """A page whose script holds a key-shaped string on its second line, and breaks if the
+    string is not the length it was written with."""
+    page = (
+        '<span data-dashboard-field="open_prs"></span>\n'
+        f'<script>var KEY = "{_KEY}"; if (KEY.length !== {len(_KEY)}) throw new Error("x");</script>'
+    )
+    return {**_PACKAGE, "view": {"html": page}}
+
+
+def test_the_page_is_run_as_the_route_serves_it(glue):
+    """The route runs a page's text through the secret filter before it composes it, so the
+    runner is handed the text that filter gives, not the text the agent wrote.
+
+    Without this a page that holds a string the filter rewrites runs here as written and
+    passes, and breaks on the gateway alone.
+    """
+    from kiro_crew.dashboard.handlers import member_dashboard
+
+    package = _keyed_package()
+    written = package["view"]["html"]
+
+    glue.module.verify_package_page(SLUG, CREW, "slot-1", package)
+
+    (ran,) = glue.ran
+    served = member_dashboard._template_text_safe(written)
+    assert served != written, "the filter left the key in the page: the test proves nothing"
+    assert ran.html == served
+    assert _KEY not in ran.html
+
+
+def test_the_filter_the_check_uses_is_the_one_the_route_has(glue, monkeypatch):
+    """The check calls the route's functions by name, so a change to the filter reaches it."""
+    from kiro_crew.dashboard.handlers import member_dashboard
+
+    monkeypatch.setattr(member_dashboard, "_template_text_safe", lambda text: text.upper())
+    monkeypatch.setattr(member_dashboard, "_manifest_text_safe", lambda model: {"seen": model})
+
+    glue.module.verify_package_page(SLUG, CREW, "slot-1", _PACKAGE)
+
+    (ran,) = glue.ran
+    assert ran.html == _PAGE.upper()
+    assert ran.model == {"seen": _PACKAGE["model"]}
+
+
+def test_a_rewrite_is_told_to_the_agent_by_place_and_line_and_never_by_content(glue):
+    package = _keyed_package()
+
+    out = glue.module.verify_package_page(SLUG, CREW, "slot-1", package)
+
+    assert out is not None and out["status"] == "passed"
+    (note,) = out["notes"]
+    assert "rewrote 1 place in it, on line 2" in note
+    assert "The check works on the rewritten page" in note
+    assert _KEY not in json.dumps(out) and "REDACTED" not in json.dumps(out)
+
+
+def test_a_page_the_filter_leaves_alone_gets_no_such_note(glue):
+    out = glue.module.verify_package_page(SLUG, CREW, "slot-1", _PACKAGE)
+
+    assert out is not None and out["notes"] == []
+
+
+def test_the_note_comes_before_the_runners_own_and_whatever_the_outcome(glue, monkeypatch):
+    """The rewrite is a fact about the page and is told for a ``skipped`` check as well."""
+    from kiro_crew import dashboard_verify
+
+    def _skip(html: str, read: Any, **_kw: Any):
+        return dashboard_verify.Verification(
+            dashboard_verify.STATUS_SKIPPED, reason="no browser here", notes=("the runner's note",)
+        )
+
+    monkeypatch.setattr(dashboard_verify, "verify_page", _skip)
+
+    out = glue.module.verify_package_page(SLUG, CREW, "slot-1", _keyed_package())
+
+    assert out is not None and out["status"] == "skipped"
+    assert out["notes"][1] == "the runner's note"
+    assert "rewrote 1 place" in out["notes"][0]
+
+
+def test_what_the_check_returns_has_crossed_the_redaction_the_tab_values_cross(glue, monkeypatch):
+    """A page chooses the text of its errors, and can build a key-shaped string that no scan
+    of its source saw. What goes back to the agent crosses the same pass the tab's values do."""
+    from kiro_crew import dashboard_verify
+
+    def _fail(html: str, read: Any, **_kw: Any):
+        return dashboard_verify.Verification(
+            dashboard_verify.STATUS_FAILED,
+            (dashboard_verify.PageError("exception", f"Error: {_KEY}", 3, 7),),
+            reason=f"stopped at {_KEY}",
+            notes=(f"saw {_KEY}",),
+            data=dashboard_verify.DATA_SYNTHETIC,
+        )
+
+    monkeypatch.setattr(dashboard_verify, "verify_page", _fail)
+
+    out = glue.module.verify_package_page(SLUG, CREW, "slot-1", _PACKAGE)
+
+    assert out is not None and _KEY not in json.dumps(out)
+    (error,) = out["errors"]
+    assert (error["kind"], error["line"], error["column"]) == ("exception", 3, 7)
+    assert error["message"].startswith("Error: ") and out["status"] == "failed"
+    assert out["data"] == "synthetic"
+
+
+def test_the_model_reaches_the_copy_as_the_route_serves_it(glue):
+    """The manifest the route sends is scrubbed in its strings and not in its keys."""
+    package = {
+        **_PACKAGE,
+        "model": {"types": {"state": {"type": "enum", "choices": ["ok", f"note {_KEY}"]}}},
+    }
+
+    glue.module.verify_package_page(SLUG, CREW, "slot-1", package)
+
+    (ran,) = glue.ran
+    assert _KEY not in json.dumps(ran.model)
+    assert ran.model["types"]["state"]["choices"][0] == "ok"
+    assert list(ran.model["types"]) == ["state"], "a name was rewritten"
+
+
+def test_a_block_package_is_not_run(glue):
+    assert glue.module.verify_package_page(SLUG, CREW, "slot-1", {"view": {"blocks": []}}) is None
+    assert _FakeLivePage.built == []
+
+
+def test_a_page_the_tab_would_mount_without_script_is_not_run(glue, monkeypatch):
+    """An owner whose egress is restricted has asked that the page's script not run."""
+    from kiro_crew.dashboard.handlers import member_dashboard
+
+    withheld = member_dashboard._EgressDecision(False, "profile", "profile_restricts_egress")
+    monkeypatch.setattr(member_dashboard, "_egress_decision", lambda *_a: withheld)
+
+    out = glue.module.verify_package_page(SLUG, CREW, "slot-1", _PACKAGE)
+
+    assert out is not None and out["status"] == "skipped"
+    assert "without script" in out["reason"]
+    assert glue.ran == [] and _FakeLivePage.built == []
+    # The refusal is a decision too, and is recorded as one.
+    (row,) = glue.audited
+    assert row["decision"].granted is False and row["decision"].reason == "profile_restricts_egress"
+
+
+def test_a_session_that_is_not_a_crewmate_has_its_page_left_unrun(glue):
+    """No tab and no owner to ask: the grant decision would be one nothing else makes."""
+    out = glue.module.verify_package_page(SLUG, "", "slot-1", _PACKAGE)
+
+    assert out is not None and out["status"] == "skipped"
+    assert "not a crewmate" in out["reason"]
+    assert glue.ran == [] and _FakeLivePage.built == [] and glue.audited == []
+
+
+def test_a_check_that_cannot_start_reads_nothing_and_audits_nothing(glue, monkeypatch):
+    """The cheap refusals come first, so a save that will be skipped costs a read of nothing
+    and takes no decision that nothing then acts on."""
+    from kiro_crew import dashboard_verify
+
+    busy = "busy: another page check is running, so this one was not started"
+    monkeypatch.setattr(dashboard_verify, "preflight", lambda: busy)
+
+    out = glue.module.verify_package_page(SLUG, CREW, "slot-1", _PACKAGE)
+
+    assert out is not None and out["status"] == "skipped" and out["reason"] == busy
+    assert glue.ran == [] and _FakeLivePage.built == [] and glue.audited == []
+
+
+def test_a_read_that_fails_is_a_skip_and_the_page_is_still_disarmed(glue):
+    """The runner never raises, but whatever the read does, the live page is let go."""
+    _FakeLivePage.fail_on_arm = True
+
+    out = glue.module.verify_package_page(SLUG, CREW, "slot-1", _PACKAGE)
+
+    assert out is not None and out["status"] == "skipped"
+    assert "could not run" in out["reason"]
+    assert _FakeLivePage.calls == ["arm", "disarm"]
+    assert glue.ran == []
+
+
+def test_the_reply_lists_each_error_with_its_place_in_the_page():
+    from kiro_crew import mcp_panel
+
+    verification = _verdict(
+        "failed",
+        errors=[
+            {
+                "kind": "exception",
+                "message": "TypeError: rows.map is not a function",
+                "line": 4,
+                "column": 8,
+            },
+            {"kind": "rejection", "message": "Error: later", "line": 9, "column": None},
+            {
+                "kind": "csp",
+                "message": "Connecting to 'https://x.test/' violates ...",
+                "line": None,
+                "column": None,
+            },
+        ],
+        omitted=2,
+        notes=["This check runs offline, so these requests were refused: https://cdn.test/x.js."],
+    )
+
+    out = mcp_panel._render_staged({"fields": 2, "blocks": 0}, "describe it", verification)
+
+    assert "verification: failed" in out
+    assert "raised 5 error(s)" in out
+    assert "1. TypeError: rows.map is not a function (view.html line 4, column 8)" in out
+    assert "2. unhandled promise rejection: Error: later (view.html line 9)" in out
+    assert "3. refused by the frame's policy: Connecting to" in out
+    assert "... and 2 more." in out
+    assert "note: This check runs offline" in out
+    assert "call dashboard_save again before you describe the page" in out
+    # The verdict leads: it is what the agent has to act on before anything else.
+    assert out.index("verification: failed") < out.index("Next: describe it")
+
+
+def test_the_reply_says_what_a_pass_and_a_skip_mean():
+    from kiro_crew import mcp_panel
+
+    passed = mcp_panel._render_staged({}, "", _verdict("passed"))
+    skipped = mcp_panel._render_staged({}, "", _verdict("skipped", reason="no browser here"))
+
+    assert "verification: passed" in passed and "no script errors" in passed
+    assert "verification: skipped -- no browser here." in skipped
+    assert "The page was not verified" in skipped
+
+
+def test_a_reply_without_a_verification_is_the_reply_it_always_was():
+    from kiro_crew import mcp_panel
+
+    base = mcp_panel._render_staged({"fields": 1, "blocks": 1}, "note")
+
+    assert "verification" not in base
+    assert mcp_panel._render_staged({"fields": 1, "blocks": 1}, "note", None) == base
+    assert mcp_panel._render_staged({"fields": 1, "blocks": 1}, "note", "garbage") == base
+
+
+def test_the_tool_hands_the_verification_to_the_agent(monkeypatch):
+    from kiro_crew import mcp_panel
+
+    monkeypatch.setattr(mcp_panel, "_strict_session_key", lambda: ("sk", ""))
+    monkeypatch.setattr(
+        mcp_panel,
+        "_post",
+        lambda *_a, **_k: {
+            "staged": {"fields": 2, "blocks": 0},
+            "next": "describe it",
+            "verification": _verdict(
+                "failed",
+                errors=[{"kind": "exception", "message": "Error: boom", "line": 3, "column": 1}],
+            ),
+        },
+    )
+
+    out = mcp_panel._call_tool_inner("dashboard_save", _html_body())
+
+    assert "verification: failed" in out
+    assert "Error: boom (view.html line 3, column 1)" in out
+
+
+def test_the_tool_description_tells_the_agent_about_the_check():
+    from kiro_crew import mcp_panel
+
+    tool = next(t for t in mcp_panel._tool_definitions() if t["name"] == "dashboard_save")
+
+    assert "`verification`" in tool["description"]
+    assert "offline" in tool["description"]
+    # A page that stops at an unfetched library is not a page to fix.
+    assert "`skipped`, not `failed`" in tool["description"]
+    # The page never sees the record, and the agent is told what it ran over instead.
+    assert "SYNTHETIC copy" in tool["description"]
+    assert "never sees the record" in tool["description"]
+    assert "a key is kept only if your page spells it out" in tool["description"]
+    # The page is checked as the tab is served it, and the agent is told what that means.
+    assert "secret filter rewrites" in tool["description"]
+    assert "which line the first is on" in tool["description"]
+    # The ways a check does not finish are told too, with the longest the save waits.
+    assert "`timed_out`" in tool["description"]
+    assert "One page is checked at a time" in tool["description"]
+    assert "never more than about twelve" in tool["description"]
+
+
+#: What the secret filter writes in place of what it takes out.
+_MARK = "[REDACTED: credential]"
+
+LINUX_ONLY = pytest.mark.skipif(
+    not platform_compat.IS_LINUX, reason="the page check runs on Linux only"
+)
+
+
+def _read_payload() -> dict[str, Any]:
+    """A read in the shape the tab is served: what the live page gives the check."""
+    from kiro_crew import dashboard_frame
+
+    return dashboard_frame.read_payload({"open_prs": 4}, agentic=["open_prs"], seq=1)
+
+
+@LINUX_ONLY
+async def test_a_saved_page_is_run_end_to_end_through_the_route(
+    monkeypatch, store, browser, tmp_path
+):
+    """The route, the real live page and the runner, with only the browser faked.
+
+    Nothing between the save and the browser is stubbed: the route stages the page, the
+    glue arms a real ``LivePage`` for the crewmate (the grant, the redaction, the feed),
+    the document is composed from a copy of that read, and the browser is handed it. What
+    comes back is the error the browser reported, placed on the line of the agent's own
+    page, and the verdict says the page ran over a synthetic copy.
+    """
+    fake = browser(
+        events=[
+            {
+                "type": "exception",
+                "find": "boom()",
+                "description": "ReferenceError: boom is not defined",
+            }
+        ],
+    )
+    body = _package_body()
+    body["view"] = {
+        "html": '<span data-dashboard-field="open_prs"></span>\n<script>\n  boom();\n</script>'
+    }
+
+    async with _client(monkeypatch) as client:
+        resp = await _save(client, body)
+        payload = await resp.json()
+
+    assert resp.status == 200, payload
+    verification = payload["verification"]
+    assert verification["status"] == "failed", verification
+    assert verification["data"] == "synthetic"
+    assert [(e["kind"], e["message"], e["line"]) for e in verification["errors"]] == [
+        ("exception", "ReferenceError: boom is not defined", 3)
+    ]
+    (served,) = fake.records("fulfill")
+    document = served["document"]
+    # The tab's first paint: the live page's read, in the frame's own document.
+    assert 'id="kirocrew-dashboard-data"' in document
+    assert '"generation"' in document and '"missing"' in document
+    assert "boom();" in document
+    assert store.records == {}
+
+
+@LINUX_ONLY
+async def test_an_error_a_page_builds_from_pieces_is_redacted_in_the_reply(
+    monkeypatch, store, tab_stubs, browser
+):
+    """The page joins two literals at run time and throws the result. The browser reports it,
+    and the save's reply does not carry it."""
+    browser(
+        events=[
+            {
+                "type": "exception",
+                "find": "boom()",
+                "description": f"Error: {_KEY}",
+            }
+        ]
+    )
+    monkeypatch.setattr(_FakeLivePage, "record", _read_payload())
+    body = _package_body()
+    body["view"] = {
+        "html": '<span data-dashboard-field="open_prs"></span>\n<script>\n  boom();\n</script>'
+    }
+
+    async with _client(monkeypatch) as client:
+        resp = await _save(client, body)
+        raw = await resp.text()
+
+    verification = json.loads(raw)["verification"]
+    assert verification["status"] == "failed", verification
+    assert [(e["kind"], e["line"]) for e in verification["errors"]] == [("exception", 3)]
+    assert _KEY not in raw
+
+
+@LINUX_ONLY
+async def test_the_browser_of_a_saved_page_is_given_a_copy_and_never_the_record(
+    monkeypatch, store, tab_stubs, browser
+):
+    """From the save to the browser: the record is read, copied and let go there.
+
+    Every value the crewmate's read held is looked for in everything the browser received,
+    and none is there; the copy has the read's field names, so a page binds as it will.
+    """
+    from kiro_crew import dashboard_frame
+
+    secrets = ["ZXQ-LEDGER-7781", "it_5e1d9c0b", "https://intranet.example.test/secret-path"]
+    record = dashboard_frame.read_payload(
+        {"open_prs": 4821, "headline": secrets[0], "owner": secrets[1], "link": secrets[2]},
+        agentic=["open_prs", "headline"],
+        seq=914827,
+    )
+    monkeypatch.setattr(_FakeLivePage, "record", record)
+    fake = browser()
+
+    async with _client(monkeypatch) as client:
+        resp = await _save(client, _html_body())
+        payload = await resp.json()
+
+    assert payload["verification"]["status"] == "passed", payload["verification"]
+    assert payload["verification"]["data"] == "synthetic"
+    everything = (fake.directory / "received.jsonl").read_text()
+    for value in (*secrets, "4821", "914827"):
+        assert value not in everything, value
+    (served,) = fake.records("fulfill")
+    for name in ("open_prs", "headline", "owner", "link"):
+        assert f'"{name}"' in served["document"], name
+
+
+@LINUX_ONLY
+async def test_a_page_that_breaks_only_on_text_the_filter_rewrites_fails_and_says_why(
+    monkeypatch, store, tab_stubs, browser
+):
+    """The page the tab runs is the filter's output, so the check runs that.
+
+    The fake browser reports an error only if the document it is handed holds the filter's
+    mark, as a page whose script depends on a string the filter rewrites does. Checked on
+    the page as written it would pass.
+    """
+    fake = browser(
+        events=[
+            {
+                "type": "exception",
+                "find": _MARK,
+                "description": "Error: the key was rewritten",
+                "if_present": True,
+            }
+        ]
+    )
+    monkeypatch.setattr(_FakeLivePage, "record", _read_payload())
+    keyed = _package_body()
+    keyed["view"] = _keyed_package()["view"]
+
+    async with _client(monkeypatch) as client:
+        broken = await (await _save(client, keyed)).json()
+        clean = await (await _save(client, _html_body())).json()
+
+    verification = broken["verification"]
+    assert verification["status"] == "failed", verification
+    assert [(e["kind"], e["message"], e["line"]) for e in verification["errors"]] == [
+        ("exception", "Error: the key was rewritten", 2)
+    ]
+    assert "rewrote 1 place in it, on line 2" in verification["notes"][0]
+    assert clean["verification"]["status"] == "passed" and clean["verification"]["notes"] == []
+    served, _ = fake.records("fulfill")
+    assert _MARK in served["document"] and _KEY not in served["document"]
+    assert _KEY not in (fake.directory / "received.jsonl").read_text()
+    assert _KEY not in json.dumps(broken)
+
+
+@pytest.fixture(scope="module")
+def real_browser():
+    """Skip unless this host has a Chromium that runs a plain page to the end.
+
+    A browser that is installed and cannot run (a container without the sandbox's
+    namespaces, a start that hangs) comes back ``skipped`` or ``timed_out``, and only a
+    ``passed`` plain page says the tests below have a browser to test with.
+    """
+    if not platform_compat.IS_LINUX:
+        pytest.skip("the page check runs on Linux only")
+    from kiro_crew import dashboard_verify
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(dashboard_verify, "find_launcher_python", lambda: sys.executable)
+        patch.setattr(platform_compat, "host_available_mib", lambda: 1 << 20)
+        probe = dashboard_verify.verify_page("<p>x</p>", _read_payload())
+    if probe.status != dashboard_verify.STATUS_PASSED:
+        pytest.skip(f"no usable browser here: {probe.status}: {probe.reason or probe.errors}")
+
+
+def _skip_if_the_host_failed(status: str, reason: str) -> None:
+    """Skip when a check says this host's browser did not run the page.
+
+    The fixture's plain page ran, and a later start can still fail on a host whose browser
+    is unreliable. That is the host's doing, and the test below says nothing about it.
+    """
+    if status == "timed_out" or (
+        status == "skipped" and reason.startswith("the browser could not")
+    ):
+        pytest.skip(f"no usable browser here: {status}: {reason}")
+
+
+@LINUX_ONLY
+async def test_a_real_page_that_breaks_only_on_what_the_filter_rewrites_is_failed(
+    monkeypatch, store, tab_stubs, real_browser
+):
+    """The failure that shows on the gateway and nowhere else, in a real browser.
+
+    The script checks the length of a string the filter rewrites. Run as the agent wrote it,
+    the page passes; saved, it is failed, at the line the script threw on, and the reply
+    says where the filter touched it.
+    """
+    from kiro_crew import dashboard_verify
+
+    monkeypatch.setattr(dashboard_verify, "find_launcher_python", lambda: sys.executable)
+    monkeypatch.setattr(platform_compat, "host_available_mib", lambda: 1 << 20)
+    record = _read_payload()
+    monkeypatch.setattr(_FakeLivePage, "record", record)
+    page = (
+        '<span data-dashboard-field="open_prs"></span>\n'
+        "<script>\n"
+        f'  var KEY = "{_KEY}";\n'
+        f'  if (KEY.length !== {len(_KEY)}) {{ throw new Error("the key was rewritten"); }}\n'
+        "</script>"
+    )
+    as_written = await asyncio.to_thread(dashboard_verify.verify_page, page, record)
+    _skip_if_the_host_failed(as_written.status, as_written.reason)
+    assert as_written.status == dashboard_verify.STATUS_PASSED, as_written
+    body = _package_body()
+    body["view"] = {"html": page}
+
+    async with _client(monkeypatch) as client:
+        resp = await _save(client, body)
+        payload = await resp.json()
+
+    verification = payload["verification"]
+    _skip_if_the_host_failed(verification["status"], verification.get("reason", ""))
+    assert verification["status"] == "failed", verification
+    assert [(e["kind"], e["line"]) for e in verification["errors"]] == [("exception", 4)]
+    assert "the key was rewritten" in verification["errors"][0]["message"]
+    assert "rewrote 1 place in it, on line 3" in verification["notes"][0]
+
+
+# --------------------------------------------------------------------------- #
+# 8. What the check costs the gateway
+# --------------------------------------------------------------------------- #
+
+
+@LINUX_ONLY
+async def test_the_event_loop_keeps_turning_while_a_page_is_being_checked(
+    monkeypatch, store, tab_stubs, browser
+):
+    """The check, with the browser holding the page, runs on a thread.
+
+    If any part of it ran on the loop, the loop could not poll for the browser's page, let
+    alone turn again, and the save would be over before the first of these assertions.
+    """
+    fake = browser(hold=True)
+    async with _client(monkeypatch) as client:
+        saving = asyncio.ensure_future(_save(client, _html_body()))
+        try:
+            await async_wait_until(
+                lambda: len(fake.records("fulfill")) == 1,
+                off_loop=True,
+                describe=lambda: f"the browser never got the page: {fake.records('start')}",
+            )
+            for _ in range(100):
+                await asyncio.sleep(0)
+            assert not saving.done(), "the save was answered while the browser held the page"
+        finally:
+            fake.release()
+        resp = await await_until(saving, what="the held save being answered")
+        payload = await resp.json()
+
+    assert payload["verification"]["status"] == "passed", payload["verification"]
+
+
+@LINUX_ONLY
+async def test_two_saves_at_once_start_one_browser(monkeypatch, store, tab_stubs, browser):
+    """One check runs at a time across the gateway; the other save is told so and goes on."""
+    fake = browser(hold=True)
+    async with _client(monkeypatch) as client:
+        saves = [asyncio.ensure_future(_save(client, _html_body())) for _ in range(2)]
+        try:
+            # One has the slot and its browser holds the page; the other is already answered.
+            await async_wait_until(
+                lambda: len(fake.records("fulfill")) == 1 and any(s.done() for s in saves),
+                off_loop=True,
+                describe=lambda: f"started {len(fake.records('start'))}, done {[s.done() for s in saves]}",
+            )
+            (turned_away,) = [s for s in saves if s.done()]
+            busy = (await (await turned_away).json())["verification"]
+            assert busy["status"] == "skipped" and busy["reason"].startswith("busy"), busy
+            assert len(fake.records("start")) == 1, "the second save started a browser"
+        finally:
+            fake.release()
+        (running,) = [s for s in saves if s is not turned_away]
+        answered = await await_until(running, what="the released save being answered")
+        ran = (await answered.json())["verification"]
+
+    assert ran["status"] == "passed", ran
+
+
+def _wait_ends_when(started):
+    """A stand-in for the save's wait that ends as soon as ``started()`` is true.
+
+    The real wait ends on a timer. This one ends when the check has done what the test needs
+    it to have done, so the order of the two is the test's and not the scheduler's. Like the
+    real wait it leaves the check running in its thread.
+    """
+
+    async def wait(work):
+        task = asyncio.ensure_future(work)
+        try:
+            await async_wait_until(started, off_loop=True)
+            raise TimeoutError
+        finally:
+            task.cancel()
+
+    return wait
+
+
+async def test_a_save_stops_waiting_for_a_check_that_does_not_come_back(
+    monkeypatch, store, tab_stubs
+):
+    """The reply is not held for a check that does not return.
+
+    The check is a function that does not return until the test lets it, and the save's wait
+    ends once the check has started, so the save is answered while the check is running.
+    """
+    from kiro_crew.dashboard.handlers import member_dashboard_fields
+
+    running = threading.Event()
+    release = threading.Event()
+
+    def _stuck(slug: str, crew: str, slot: str, package: dict[str, Any], deadline=None):
+        running.set()
+        release.wait(60)
+        return None
+
+    monkeypatch.setattr(member_dashboard_fields, "verify_package_page", _stuck)
+    monkeypatch.setattr(routes, "_await_check", _wait_ends_when(running.is_set))
+
+    async with _client(monkeypatch) as client:
+        try:
+            resp = await _save(client, _html_body())
+            payload = await resp.json()
+        finally:
+            release.set()
+
+    assert resp.status == 200, payload
+    assert running.is_set(), "the check never started"
+    assert payload["verification"]["status"] == "timed_out"
+    assert "stopped waiting for it" in payload["verification"]["reason"]
+    assert payload["staged"], "the page is staged whatever the check did"
+
+
+async def test_the_save_waits_for_a_check_no_longer_than_the_bound(monkeypatch):
+    """The one wait is ``dashboard_verify.REPLY_SECONDS``, read when the save waits."""
+    from kiro_crew import dashboard_verify
+
+    asked: list[float | None] = []
+
+    async def _fake_wait_for(work, timeout=None):
+        asked.append(timeout)
+        return await work
+
+    # Only in the route module's own namespace, so nothing else that waits is touched.
+    monkeypatch.setattr(routes, "asyncio", SimpleNamespace(wait_for=_fake_wait_for))
+    monkeypatch.setattr(dashboard_verify, "REPLY_SECONDS", 4.5)
+
+    async def done():
+        return {"status": "passed"}
+
+    assert await routes._await_check(done()) == {"status": "passed"}
+    assert asked == [4.5]
+
+
+@LINUX_ONLY
+async def test_a_check_the_save_stopped_waiting_for_still_holds_its_place(
+    monkeypatch, store, tab_stubs, browser
+):
+    """The save is answered, the check goes on in its thread and keeps the one place, so a
+    second save is turned away rather than started on top of it."""
+    from kiro_crew import dashboard_verify
+
+    fake = browser(hold=True)
+    real_wait = routes._await_check
+    monkeypatch.setattr(
+        routes, "_await_check", _wait_ends_when(lambda: len(fake.records("fulfill")) == 1)
+    )
+
+    async with _client(monkeypatch) as client:
+        try:
+            # The wait ends once the browser holds the page, which is while the check runs.
+            first = (await (await _save(client, _html_body())).json())["verification"]
+            monkeypatch.setattr(routes, "_await_check", real_wait)
+            second = (await (await _save(client, _html_body())).json())["verification"]
+            starts = len(fake.records("start"))
+        finally:
+            fake.release()
+        await async_wait_until(lambda: not dashboard_verify._SLOT.locked())
+
+    assert first["status"] == "timed_out" and "stopped waiting for it" in first["reason"]
+    assert second["status"] == "skipped" and second["reason"].startswith("busy"), second
+    assert starts == 1, "the second save started a browser"
+
+
+@LINUX_ONLY
+async def test_a_save_whose_limit_has_passed_starts_no_browser_and_says_timed_out(
+    monkeypatch, store, tab_stubs, browser
+):
+    """The limit is counted from the save, so a check that gets its turn after it is over
+    does not start a browser. (Killing a browser that outlives the limit is the runner's,
+    and is tested there.)"""
+    from kiro_crew import dashboard_verify
+
+    fake = browser()
+    monkeypatch.setattr(dashboard_verify, "RUN_TIMEOUT_SECONDS", 0.0)
+
+    async with _client(monkeypatch) as client:
+        resp = await _save(client, _html_body())
+        payload = await resp.json()
+
+    verification = payload["verification"]
+    assert verification["status"] == "timed_out", verification
+    assert "no time left" in verification["reason"]
+    assert fake.records("start") == []
+    assert not dashboard_verify._SLOT.locked()
+
+
+def test_only_a_save_of_a_written_page_can_start_a_check():
+    """The browser is for ``dashboard_save`` of a page written as ``view.html`` and for
+    nothing else: not a ``dashboard_write``, a preview, an apply, or the load of a page.
+
+    Every module that names the runner or the glue is listed, and within the route module
+    the one function that starts a check is the save.
+    """
+    from source_corpus import iter_candidate_sources, src_root
+
+    users = sorted(
+        path.relative_to(src_root()).as_posix()
+        for path, _text in iter_candidate_sources(
+            require_any=("verify_package_page", "verify_page", "dashboard_verify")
+        )
+    )
+    assert users == [
+        "dashboard/handlers/agent_panel.py",
+        "dashboard/handlers/member_dashboard_fields.py",
+        "dashboard_verify.py",
+    ]
+    tree = ast.parse(Path(routes.__file__).read_text(encoding="utf-8"))
+    starters = {
+        fn.name
+        for fn in ast.walk(tree)
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for call in ast.walk(fn)
+        if isinstance(call, ast.Call) and getattr(call.func, "id", None) == "_page_check"
+    }
+    assert starters == {"api_dashboard_save"}
+
+
+def test_the_reply_says_what_a_timed_out_check_means():
+    from kiro_crew import mcp_panel
+
+    out = mcp_panel._render_staged(
+        {"fields": 2, "blocks": 0},
+        "describe it",
+        _verdict(
+            "timed_out",
+            reason="the check reached its 8 second limit and the browser was stopped",
+            errors=[
+                {
+                    "kind": "timeout",
+                    "message": "the page did not finish loading",
+                    "line": None,
+                    "column": None,
+                }
+            ],
+        ),
+    )
+
+    assert "verification: timed_out -- the check reached its 8 second limit" in out
+    assert "The page was not verified" in out
+    assert "a loop or a wait that may never end" in out
+    assert "1. the page did not finish loading" in out
+    assert out.index("verification: timed_out") < out.index("Next: describe it")
+
+
+def test_the_reply_says_the_page_ran_over_a_synthetic_copy():
+    from kiro_crew import mcp_panel
+
+    passed = mcp_panel._render_staged({}, "", _verdict("passed"))
+    failed = mcp_panel._render_staged(
+        {},
+        "",
+        _verdict(
+            "failed",
+            errors=[{"kind": "exception", "message": "TypeError: x", "line": 2, "column": 1}],
+        ),
+    )
+    plain = mcp_panel._render_staged({}, "", _verdict("passed", data=""))
+
+    assert "ran once over a synthetic copy of your crewmate's current data" in passed
+    assert "the same shape with invented values" in passed
+    assert "ran once over a synthetic copy" in failed
+    assert "your crewmate's data and raised" not in failed
+    # A verdict that does not say what it ran over does not claim a copy.
+    assert "synthetic" not in plain

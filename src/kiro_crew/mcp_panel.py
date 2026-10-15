@@ -251,7 +251,26 @@ def _tool_definitions() -> list[dict[str, Any]]:
                 "person IN WORDS -- the fields it holds and the blocks that lay "
                 "them out -- and do not offer a link to open: there is none, and "
                 "the tab turns that refusal into a load error. A later change "
-                "lifts both refusals together. The staged "
+                "lifts both refusals together. A page you write as `view.html` is "
+                "RUN once by the gateway over a SYNTHETIC copy of your crewmate's current "
+                "data (the same shape with invented values, so a page never sees the "
+                "record; a key is kept only if your page spells it out or the dashboard "
+                "type catalog lists it), and "
+                "the reply carries a `verification` block: `passed`, "
+                "`failed` with each script error and the `view.html` line and column "
+                "it was thrown at, `timed_out` when the run hit its time limit, or "
+                "`skipped` with the reason. Fix a failed page and save again BEFORE you "
+                "describe it to the person. The run is offline: a library the page "
+                "loads from the CDN allowlist is not fetched, and a page whose script "
+                "stops at that library's name is `skipped`, not `failed`. The page is "
+                "checked as the dashboard shows it: the gateway's secret filter rewrites "
+                "text in a page that looks like a key (a long run of letters and digits "
+                "can), and when it did the reply says how many places and which line the "
+                "first is on. One page is "
+                "checked at a time across the gateway, so a save that finds it busy, or "
+                "a machine short of memory, is `skipped` and does not wait. The save "
+                "waits for the run, usually about a second and never more than about "
+                "twelve. The staged "
                 "page expires, and a stale one has to be saved again. Two things "
                 "still belong to the "
                 "template path -- dashboard_fields lists the TEMPLATE page's "
@@ -580,7 +599,9 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
             # from. Shortened to a generic failure it would cost a cycle and teach
             # nothing.
             return redact(f"Error: {api_err}")
-        return redact(_render_staged(d.get("staged") or {}, str(d.get("next") or "")))
+        return redact(
+            _render_staged(d.get("staged") or {}, str(d.get("next") or ""), d.get("verification"))
+        )
 
     if name == "dashboard_templates":
         query = args.get("query")
@@ -669,7 +690,83 @@ def _guide_tail(d: dict[str, Any]) -> str:
     return f"\n\n{block}" if isinstance(block, str) and block else ""
 
 
-def _render_staged(staged: dict[str, Any], note: str) -> str:
+_ERROR_LABELS = {
+    "rejection": "unhandled promise rejection: ",
+    "csp": "refused by the frame's policy: ",
+}
+
+
+#: What the agent is told the page ran over, when it ran over anything.
+_SYNTHETIC = (
+    "a synthetic copy of your crewmate's current data (the same shape with invented values)"
+)
+
+
+def _error_lines(verification: dict[str, Any]) -> list[str]:
+    """The numbered errors of a ``failed`` or ``timed_out`` block, each with its position."""
+    errors = [e for e in verification.get("errors") or [] if isinstance(e, dict)]
+    lines = []
+    for number, error in enumerate(errors, start=1):
+        where = ""
+        if error.get("line") is not None:
+            where = f" (view.html line {error['line']}"
+            if error.get("column") is not None:
+                where += f", column {error['column']}"
+            where += ")"
+        label = _ERROR_LABELS.get(str(error.get("kind")), "")
+        lines.append(f"  {number}. {label}{error.get('message')}{where}")
+    hidden = int(verification.get("omitted") or 0)
+    if hidden:
+        lines.append(f"  ... and {hidden} more.")
+    return lines
+
+
+def _render_verification(verification: Any) -> list[str]:
+    """The ``verification`` block of a save reply, as lines for the agent.
+
+    Leads with the verdict, because the verdict decides what the agent does next: a
+    ``failed`` page is fixed and saved again before anyone is told about it. Each error
+    carries where it was thrown, as a position in the agent's own ``view.html``, which is
+    the one thing it cannot find out from its own session. A page that ran says what it
+    ran over: a copy with the record's shape and invented values.
+    """
+    if not isinstance(verification, dict):
+        return []
+    status = verification.get("status")
+    ran_over = _SYNTHETIC if verification.get("data") == "synthetic" else "your crewmate's data"
+    if status == "passed":
+        lines = [
+            f"verification: passed -- the page ran once over {ran_over} and raised no script errors."
+        ]
+    elif status == "skipped":
+        lines = [
+            f"verification: skipped -- {verification.get('reason') or 'the check did not run'}. "
+            "The page was not verified: a script error in it may still be there."
+        ]
+    elif status == "timed_out":
+        errors = _error_lines(verification)
+        lines = [
+            f"verification: timed_out -- {verification.get('reason') or 'the check ran out of time'}. "
+            "The page was not verified. If a script of yours has a loop or a wait that may never "
+            "end, fix it and call dashboard_save again; otherwise call it again."
+        ]
+        lines.extend(errors)
+    elif status == "failed":
+        errors = _error_lines(verification)
+        count = len(verification.get("errors") or []) + int(verification.get("omitted") or 0)
+        lines = [
+            f"verification: failed -- the page ran once over {ran_over} and raised {count} "
+            "error(s). Fix them and call dashboard_save again before you describe the page "
+            "to the person."
+        ]
+        lines.extend(errors)
+    else:
+        return []
+    lines.extend(f"  note: {note}" for note in verification.get("notes") or [])
+    return lines
+
+
+def _render_staged(staged: dict[str, Any], note: str, verification: Any = None) -> str:
     """What is STAGED, and what an agent may do with it on this base.
 
     NO LINK, because there is none to give: the save reply carries no
@@ -688,6 +785,10 @@ def _render_staged(staged: dict[str, Any], note: str) -> str:
         f"{staged.get('blocks')} block(s). Nothing on your crewmate's Dashboard has "
         "changed yet, and nothing is stored."
     ]
+    checked = _render_verification(verification)
+    if checked:
+        lines.append("")
+        lines.extend(checked)
     if note:
         lines.append("")
         lines.append(f"Next: {note}")

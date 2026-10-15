@@ -1166,6 +1166,20 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         "acp/kas_bundle.py::_probe_node",
         "browser_cli/launcher.py::_run_cli",
         "browser_cli/view.py::_spawn",
+        # The offline run of an authored dashboard page (``dashboard_verify``). The argv
+        # is fixed: a system Python and a browser path, each from a fixed list of system
+        # locations and each past the strict provider-executable check (root-owned, not a
+        # link, not writable by this account, so nothing the agent can write is ever
+        # run), a launcher stub that moves the DevTools pipe onto descriptors 3 and 4,
+        # and flags that are constants of ours plus a throwaway profile directory we
+        # created. The page is DATA sent over the pipe; it reaches no flag, path or
+        # environment variable.
+        # Not routed through the sandbox chokepoint, on purpose: Chromium's own sandbox
+        # is the containment and it must create namespaces, which the chokepoint's mount
+        # namespace would deny; the process runs on a scrubbed environment, with every
+        # request but the page refused, no listening port, and its process group killed
+        # at the end.
+        "dashboard_verify.py::_spawn",
         "cli.py::_consolidate_cmd",
         "cli.py::_ensure_node",
         "cli.py::_node_ok",

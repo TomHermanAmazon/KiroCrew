@@ -1342,6 +1342,72 @@ redactor would mask is refused too, before anything is written — every one of
 those names is a join key, so a masked name would break the page rather than
 protect it.
 
+The save then runs a page written as `view.html` once, offline
+(`dashboard_verify.verify_page`, reached through
+`member_dashboard_fields.verify_package_page`) and returns the outcome as the reply's
+`verification` block: `passed`, `failed` with each error's message and its line and
+column in the agent's own `view.html`, `timed_out` when the run hit its limit, or
+`skipped` with the reason. **The page is not given the record.** A staged page is one no
+person has approved, and "a staged page is never fed, so a page nobody approved never
+receives a value" holds: the read `LivePage.arm` builds for the tab is taken inside the
+gateway only to be copied (`dashboard_synth.synthesize`), and the browser is handed the
+copy alone. The copy keeps the record's shape -- the fields the package declares, list
+lengths, nulls and absent fields, each value's type, a string's length and the kinds of its
+characters, a number's sign, size and wholeness, the formats of dates and ids, booleans,
+and the words of the crew-log schema's closed vocabularies -- and invents every other
+value: free text, numbers, ids, times and links (`https://example.invalid/...`). An `enum`
+field shows one of the labels the package declares, drawn at random. A key is kept when the
+type catalog lists it as a property of an object, or when the page itself names it as a
+word or in quotes and it is not an id, because a page reaches a key only by spelling it
+and the keys of the values the owner and the publishing crew wrote are their own words; a
+page can therefore confirm that a key it guessed is there, and learn no key it did not
+spell. Every other key is invented: the keys of a map keyed by a runtime id (a model, a
+tool, a subagent) always are, and so are those of an object nested inside a row of a fold's
+list, which the catalog does not describe and some of which are keyed by data. The generator is seeded from the operating system on each
+call, never from the record, and a replacement is drawn without looking at the value it
+replaces or at any other value of the record: leaving the real letter, digit or number out
+of the draw would make it the one thing never shown to a page saved again and again. A draw
+can therefore equal the real value, at the rate it equals any other value of its kind. Equal
+real values stay equal and distinct ones stay distinct (the numbers of one size are shared
+out without a repeat, in one draw each; a text another text already has is drawn again), so
+a join on an id still joins. `verification.data` says `synthetic`, and every value an error
+quotes is invented. The document is `dashboard_frame.compose` over the copy, so the page
+meets the same bindings and policy it will really get. The page's text is the text the tab is served:
+the route runs a page's markup and script through the secret filter
+(`member_dashboard._template_text_safe`, and a manifest's strings through
+`_manifest_text_safe`) before it composes the document, so the check calls those same two
+functions first, and a script that depends on a string the filter rewrites fails here as it
+does there. When the filter changed the page, a note in `verification.notes` says how many
+places and on which line of `view.html` the first is (`dashboard_verify.rewrite_note`),
+and never what was replaced. What the check returns crosses `member_dashboard._page_safe`,
+the redaction the tab's values cross, because a page chooses the text of its own errors.
+
+It runs in a Chrome or Chromium an administrator installed on the gateway host, started
+by a system Python (each root-owned, not a link, not writable by the gateway's account: a
+program the agent could write would let the agent choose what the gateway runs) over a
+DevTools pipe, with the browser's own sandbox on, a throwaway profile as its working
+directory and a scrubbed environment. It runs on Linux only: macOS keeps apps in a
+directory every administrator account can write, which the same rule refuses, and any
+host that is not Linux answers `skipped`. The script-grant decision is audited like the
+tab's, in both directions, and a page the tab would mount without script is not run. The
+page's script runs on the gateway host, so every way out is closed: the page's policy, a
+request filter that answers only the page, no name resolution, a proxy at a closed port
+and no WebRTC. A library the page loads from the CDN allowlist is therefore not fetched,
+and a page whose script stops at that library's undefined name is `skipped` and not
+`failed` (any other error is still `failed`).
+
+It costs the gateway little by construction. It runs only for a save of `view.html`,
+never for a write, a preview, an apply or a page load. One check runs at a time across
+the gateway: a save that finds one running, or the machine short of memory
+(`platform_compat.host_available_mib` under the spawn floor; an unreadable host is not
+held back), is `skipped` at once and does not wait. The copy is two linear walks over a
+bounded read, on the check's thread. The run has one hard limit (`RUN_TIMEOUT_SECONDS`),
+counted from the save: at it the browser's whole process group is killed and the result is
+`timed_out`. The read of the record cannot be interrupted, so a read that outlasts the
+limit starts no browser, and the save route waits at most `REPLY_SECONDS` for the check
+whatever it is doing. A block layout has no script and
+returns `verification: null`. The page stays staged whatever the run finds.
+
 **NOTHING IS STORED BY THE SAVE.** It stages the page. The package runs the
 store's own write gate (`canonical_package_content`) at STAGING, so a layout that
 could never be stored is refused while the agent is still composing rather than
