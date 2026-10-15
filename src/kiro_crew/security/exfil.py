@@ -39,6 +39,7 @@ from kiro_crew.sel import SecurityEvent, SecurityEventLog
 
 from .denied_rules import _INERT_SEARCH_VERBS, _exception_eligible
 from .redaction import (
+    CREDENTIAL_REDACTION_TAGS,
     _contains_fixed_credential,
     _text_contains_bare_secret,
     redact_credentials,
@@ -70,20 +71,22 @@ def exfil_query_min_len() -> int:
 # a ``.<letters>`` TLD, so ``http://169.254.169.254/latest/…/<secret>`` never
 # matched _URL_RE and its path/query was never scanned. Group 3 stays the
 # path+query so the scan/redact call sites are unchanged.
-_URL_RE = re.compile(
-    r"https?://"
-    r"("
-    r"[a-zA-Z0-9._-]+\.[a-zA-Z]{2,}"  # DNS name with a letter TLD
-    r"|\d{1,3}(?:\.\d{1,3}){3}"  # raw IPv4 literal
-    r"|\[[0-9A-Fa-f:.]+\]"  # bracketed IPv6 literal (incl. IPv4-mapped ::ffff:d.d.d.d)
-    # Group 3 = path AND/OR query. It must start with ``/`` (path) OR ``?``
-    # (a query attached directly to the host, no path segment). The prior
-    # ``/[...]*`` required a leading slash, so ``https://host?leak=<secret>``
-    # yielded group(3)=None and both scan/redact bailed on ``qmark == -1``,
-    # never inspecting the query — a real exfil bypass. ``[/?]`` admits both;
-    # the ``path_and_query.find("?")`` split at the call sites is unchanged.
-    r")(:\d+)?([/?][^\s)\"'>]*)?"
-)
+#: ``_URL_RE``'s host alternatives: a DNS name with a letter TLD, a raw IPv4
+#: literal, or a bracketed IPv6 literal (incl. IPv4-mapped ::ffff:d.d.d.d).
+_URL_HOST = r"[a-zA-Z0-9._-]+\.[a-zA-Z]{2,}|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9A-Fa-f:.]+\]"
+#: What ends an address, besides whitespace.
+_URL_END_PUNCTUATION = ")\"'>"
+#: One character of an address's path or query.
+_URL_PATH_CHAR = rf"[^\s{re.escape(_URL_END_PUNCTUATION)}]"
+# Group 3 = path AND/OR query. It must start with ``/`` (path) OR ``?``
+# (a query attached directly to the host, no path segment). The prior
+# ``/[...]*`` required a leading slash, so ``https://host?leak=<secret>``
+# yielded group(3)=None and both scan/redact bailed on ``qmark == -1``,
+# never inspecting the query — a real exfil bypass. ``[/?]`` admits both;
+# the ``path_and_query.find("?")`` split at the call sites is unchanged.
+# The host and path classes are the shared fragments above, which the
+# split-address folds below read as well.
+_URL_RE = re.compile(rf"https?://({_URL_HOST})(:\d+)?([/?]{_URL_PATH_CHAR}*)?")
 
 # Query string length threshold — normal URLs rarely exceed this
 _EXFIL_QUERY_MIN_LEN = 200
@@ -1085,6 +1088,161 @@ def scan_exfiltration_urls(text: str) -> list[str]:
 #: drift.
 EXFILTRATION_REDACTION_TAG_PREFIX = "[REDACTED: suspicious URL to "
 
+#: A link placeholder, and any tag an earlier pass writes (each holds a space,
+#: so ``_URL_RE`` would end an address at it).
+_LINK_TAG = (
+    re.escape(EXFILTRATION_REDACTION_TAG_PREFIX) + r"(?:\[[0-9A-Fa-f:.]+\]|[a-zA-Z0-9._-]+)\]"
+)
+_ANY_TAG = "|".join([*(re.escape(tag) for tag in CREDENTIAL_REDACTION_TAGS), _LINK_TAG])
+#: The path/query class of ``_URL_RE``, read through tags.
+_ADDRESS_RUN = rf"(?:{_ANY_TAG}|{_URL_PATH_CHAR})"
+#: A link placeholder with text glued after it: in text redacted in pieces
+#: (streamed, one delta at a time) the rest of an address whose first piece
+#: became the placeholder. An address read through an earlier credential tag
+#: ends at the tag's space, so the rest of that tag can follow too. Group 1 is
+#: the placeholder, group 2 its host.
+_TAG_REST = "|".join(re.escape(tag.split(":", 1)[1]) for tag in CREDENTIAL_REDACTION_TAGS)
+#: A link placeholder whose ``[REDACTED:`` head a labelled credential pass in
+#: the same piece consumed as the label's value: what is left reads
+#: ``<credential tag> suspicious URL to <host>]``.
+_DAMAGED_LINK_TAG_RE = re.compile(
+    "("
+    + "|".join(re.escape(tag) for tag in CREDENTIAL_REDACTION_TAGS)
+    + ")"
+    + re.escape(" " + EXFILTRATION_REDACTION_TAG_PREFIX.split(": ", 1)[1])
+    + r"(\[[0-9A-Fa-f:.]+\]|[a-zA-Z0-9._-]+)\]"
+)
+#: A credential tag with an address run glued after it, and the tags that
+#: split such a run into plain pieces.
+_CRED_TAIL_RE = re.compile(
+    "(" + "|".join(re.escape(tag) for tag in CREDENTIAL_REDACTION_TAGS) + rf")({_ADDRESS_RUN}+)"
+)
+_TAIL_SPLIT_RE = re.compile(_ANY_TAG)
+_SPLIT_URL_TAIL_RE = re.compile(
+    "("
+    + re.escape(EXFILTRATION_REDACTION_TAG_PREFIX)
+    + r"(\[[0-9A-Fa-f:.]+\]|[a-zA-Z0-9._-]+)\])"
+    + rf"(?:(?:{_TAG_REST}){_ADDRESS_RUN}*|{_ADDRESS_RUN}+)"
+)
+#: An address read like ``_URL_RE`` but through tags, for an address a piece
+#: boundary cut before its credential (the credential's piece became a tag).
+#: Tags that mark an address redacted in pieces: a credential tag or a nested
+#: link placeholder.
+_ADDRESS_TAGS = (*CREDENTIAL_REDACTION_TAGS, EXFILTRATION_REDACTION_TAG_PREFIX)
+#: A scheme and host anywhere in a text, for the hosts nested in an address.
+_URL_SCHEME_HOST_RE = re.compile(rf"https?://({_URL_HOST})")
+_PIECED_ADDRESS_RE = re.compile(rf"https?://({_URL_HOST})(?::\d+)?[/?]{_ADDRESS_RUN}*")
+
+
+def _restore_damaged_placeholders(text: str) -> str:
+    """Restore a link placeholder a labelled credential pass damaged, so the
+    folds read it as the placeholder it was. It only rewrites redaction tags."""
+    return _DAMAGED_LINK_TAG_RE.sub(
+        lambda m: f"{m.group(1)} {EXFILTRATION_REDACTION_TAG_PREFIX}{m.group(2)}]", text
+    )
+
+
+def _blocked_hosts(blocked_addresses: frozenset[str] | set[str]) -> set[str]:
+    """Every host named in a blocked address, nested ones included: a piece
+    cut before ``https://inner`` inside a blocked query is redacted as a link
+    to the inner host."""
+    hosts = set()
+    for address in blocked_addresses:
+        for match in _URL_SCHEME_HOST_RE.finditer(address):
+            hosts.add(match.group(1))
+    return hosts
+
+
+def fold_pieced_addresses(text: str, blocked_addresses: frozenset[str] | set[str]) -> str:
+    """Replace an address holding a credential or link tag with its placeholder.
+
+    A link tag inside an address is a nested address a piece's redaction
+    turned into its placeholder; read through tags, the outer address still
+    holds the rest of both.
+
+    Default-refuse: any such address on a host the raw copy's pass blocked an
+    address on is folded, whatever the tag stood for. Telling which tagged
+    address was the blocked one means guessing what each tag replaced, and
+    every guess has been beaten; the cost is that a kept link on that host
+    with a credential masked inside it is saved as the placeholder too. It
+    only removes text.
+    """
+    hosts = _blocked_hosts(blocked_addresses)
+    if not hosts or not any(tag in text for tag in _ADDRESS_TAGS):
+        return text
+    # First, while a damaged placeholder's credential-tag prefix still exists:
+    # folding an outer address would consume that prefix.
+    text = _restore_damaged_placeholders(text)
+    folds = [0]
+
+    def _fold(match: re.Match[str]) -> str:
+        address = match.group(0)
+        if match.group(1) in hosts and any(t in address for t in _ADDRESS_TAGS):
+            folds[0] += 1
+            return f"{EXFILTRATION_REDACTION_TAG_PREFIX}{match.group(1)}]"
+        return address
+
+    folded = _PIECED_ADDRESS_RE.sub(_fold, text)
+    if folds[0]:
+        # Counts only, never text, as for the tail fold.
+        logger.warning(
+            "split-link fold: replaced %d tagged address(es) on a blocked host " "(default-refuse)",
+            folds[0],
+        )
+    return folded
+
+
+def fold_split_url_tails(text: str, blocked_addresses: frozenset[str] | set[str]) -> str:
+    """Remove the text glued after a link placeholder on a blocked host.
+
+    ``blocked_addresses`` are the addresses a pass over the same text before
+    any redaction blocked. Default-refuse: after every placeholder on
+    a host with a blocked address, the glued run (what ``_URL_RE`` would read
+    as the rest of an address) is removed. Telling an echoed placeholder from
+    one a piece's redaction wrote means guessing, and every guess has been
+    beaten; the cost is that markdown or prose glued straight to an echoed
+    placeholder on that host goes too, logged as a count. It stays a second layer under any
+    stream-side fix: the saved reply is still built from per-delta
+    redaction. ``test_presigned_links_cut_anywhere_save_no_query`` pins both
+    folds. It only removes text.
+    """
+    hosts = _blocked_hosts(blocked_addresses)
+    if not hosts or not any(tag in text for tag in _ADDRESS_TAGS):
+        return text
+    text = _restore_damaged_placeholders(text)
+    cut = [0]
+
+    def _fold(match: re.Match[str]) -> str:
+        if match.group(2) not in hosts:
+            return match.group(0)
+        cut[0] += 1
+        return match.group(1)
+
+    folded = _SPLIT_URL_TAIL_RE.sub(_fold, text)
+    # A credential pass can consume an address's head (scheme and host) with
+    # the value before it, leaving its query glued to the credential tag with
+    # no address or placeholder around it. That run is removed when a piece of
+    # it, four or more characters, is part of a blocked address.
+    hay = "\n".join(blocked_addresses)  # a newline never occurs in an address
+
+    def _fold_cred(match: re.Match[str]) -> str:
+        pieces = [piece for piece in _TAIL_SPLIT_RE.split(match.group(2)) if len(piece) >= 4]
+        if any(piece in hay for piece in pieces):
+            cut[0] += 1
+            return match.group(1)
+        return match.group(0)
+
+    folded = _CRED_TAIL_RE.sub(_fold_cred, folded)
+    if cut[0]:
+        # Counts only, never text: a reply that lost glued text is diagnosable
+        # without the log holding what it removed.
+        logger.warning(
+            "split-link fold: removed glued text after %d placeholder(s) on a "
+            "blocked host (default-refuse)",
+            cut[0],
+        )
+    return folded
+
 
 #: What one message may retain about blocked links. The bound belongs at the
 #: RETENTION points rather than at a render site, because the store IS the
@@ -1355,8 +1513,12 @@ def redact_exfiltration_urls_with_records(
     text: str,
     *,
     extra_exempt_hosts: frozenset[str] = frozenset(),
+    blocked_addresses_out: set[str] | None = None,
 ) -> tuple[str, list[str], list[dict]]:
     """Redact suspicious URLs and, in the SAME pass, describe each one.
+
+    ``blocked_addresses_out``, when given, receives every address this pass
+    redacted, including any past the record cap or without a record.
 
     ``extra_exempt_hosts`` joins the platform's exact-host exemption for this
     call: the hosts a reader allowed for one workspace from the dashboard
@@ -1415,6 +1577,8 @@ def redact_exfiltration_urls_with_records(
             continue
         warnings.append(warning)
         matched = match.group(0)
+        if blocked_addresses_out is not None:
+            blocked_addresses_out.add(matched)
         # replace() rewrites every occurrence of this exact URL, and the loop can
         # revisit it, so the record set is keyed by the matched string.
         result = result.replace(matched, f"{EXFILTRATION_REDACTION_TAG_PREFIX}{domain}]")

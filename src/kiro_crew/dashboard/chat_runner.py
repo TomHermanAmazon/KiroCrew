@@ -657,7 +657,12 @@ from kiro_crew.security import (
     sanitized_oauth_endpoint_display,
 )
 from kiro_crew.security.credential_sources import credential_records
-from kiro_crew.security.exfil import MAX_BLOCKED_LINKS_PER_MESSAGE
+from kiro_crew.security.exfil import (
+    EXFILTRATION_REDACTION_TAG_PREFIX,
+    MAX_BLOCKED_LINKS_PER_MESSAGE,
+    fold_pieced_addresses,
+    fold_split_url_tails,
+)
 from kiro_crew.security.readonly_bash import (
     command_invokes_git,
     is_read_only_bash,
@@ -2095,14 +2100,30 @@ def _redact_segment(slot: _ChatSlot, text: str) -> tuple[str, list[dict], list[d
     reflow, plan-marker stripping) or a delta boundary that cut a value
     differently changes neither pairing. Where they do not pair, ``text``'s own
     records stand, which describe fewer placeholders but never a wrong one.
+    A delta boundary inside a blocked address leaves pieces of it in ``text``:
+    the rest of its query after the placeholder its first piece became, or the
+    address around a credential tag when the cut fell before its credential.
+    Both are folded here against the addresses the raw copy's pass blocked, so
+    the saved reply holds one placeholder for the address and none of its query.
     Returns ``(text, blocked_links, redactions)``.
     """
     raw = slot.segment_raw_text
     slot.segment_raw_text = ""
-    redacted, blocked_links, redactions = _redact_segment_text(slot, text)
     if not raw or raw == text:
-        return redacted, blocked_links, redactions
-    raw_redacted, raw_links, raw_redactions = _redact_segment_text(slot, raw)
+        if raw is None and EXFILTRATION_REDACTION_TAG_PREFIX in text:
+            # No raw copy (past _SEGMENT_RAW_MAX_CHARS): the split-link folds
+            # cannot run, so a link cut by a delta may keep its query tail.
+            logger.warning("segment flush: raw copy unavailable; split-link folds skipped")
+        return _redact_segment_text(slot, text)
+    raw_blocked: set[str] = set()
+    raw_redacted, raw_links, raw_redactions = _redact_segment_text(
+        slot, raw, blocked_addresses_out=raw_blocked
+    )
+    # Both folds run before this text's own passes, so every record those
+    # passes write describes the text that is saved.
+    redacted, blocked_links, redactions = _redact_segment_text(
+        slot, fold_pieced_addresses(text, raw_blocked), fold_tails=raw_blocked
+    )
     if raw_redacted == redacted:
         return redacted, raw_links, raw_redactions
     seen = {r.get("url") or (r.get("domain"), r.get("path")) for r in blocked_links}
@@ -2124,14 +2145,29 @@ def _redact_segment(slot: _ChatSlot, text: str) -> tuple[str, list[dict], list[d
 _CREDENTIAL_TAG_RE = re.compile(r"\[REDACTED: (?:encoded )?credential\]")
 
 
-def _redact_segment_text(slot: _ChatSlot, text: str) -> tuple[str, list[dict], list[dict]]:
-    """Both removers over ``text``, with the records each placeholder needs."""
+def _redact_segment_text(
+    slot: _ChatSlot,
+    text: str,
+    *,
+    blocked_addresses_out: set[str] | None = None,
+    fold_tails: set[str] | None = None,
+) -> tuple[str, list[dict], list[dict]]:
+    """Both removers over ``text``, with the records each placeholder needs.
+
+    ``fold_tails`` (the addresses the raw copy's pass blocked) folds an
+    address's rest glued after its placeholder between the two removers, so
+    the credential pass writes its records on the folded text.
+    """
     # Never relaxed by the reader's allowed hosts: what is saved must not depend
     # on the allow-list, so an allowed link is kept as a placeholder with its
     # record and shown again at display time (chat_utils._prepare_messages).
-    redacted, exfil_warnings, blocked_links = redact_exfiltration_urls_with_records(text)
+    redacted, exfil_warnings, blocked_links = redact_exfiltration_urls_with_records(
+        text, blocked_addresses_out=blocked_addresses_out
+    )
     for w in exfil_warnings:
         logger.warning("Exfiltration URL redacted in chat segment: %s", w)
+    if fold_tails is not None:
+        redacted = fold_split_url_tails(redacted, fold_tails)
     redacted, cred_warnings, matches = redact_credentials_with_records(redacted)
     for w in cred_warnings:
         logger.warning("Credential redacted in chat segment: %s", w)

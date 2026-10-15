@@ -335,7 +335,13 @@ def _url_payload_command(n: int) -> str:
 #: Raised again, from 29,293, for the ``engines`` leaf in ``paths.py``: the KAS
 #: engine bundle the gateway installs and later executes joins the file-tool floor
 #: beside ``playwright-cli`` -- one entry and its reason. No matcher moved.
-_PACKAGE_LINE_BUDGET = 29_296
+#:
+#: Raised again, from 29,296, for a blocked address cut into pieces: two
+#: folds the chat segment save runs against its raw copy (a query tail glued to
+#: a placeholder a piece's redaction wrote, and an address around a credential
+#: tag or nested link placeholder on a host the raw pass blocked). Both only remove text; no existing pattern,
+#: threshold, cut or pass is relaxed.
+_PACKAGE_LINE_BUDGET = 29_460
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second

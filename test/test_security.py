@@ -8941,6 +8941,180 @@ class TestScanHistory:
         assert len(findings) == 5
 
 
+class TestSplitAddressRedaction:
+    """A blocked address cut into pieces is removed as one link.
+
+    Streamed text is redacted in pieces, and a piece boundary can fall inside a
+    link's query. The live stream and the saved text must both hold one
+    placeholder for the link and none of its query.
+    """
+
+    HOST = "my-bucket.s3.us-east-1.amazonaws.com"
+    KEY = "AKIA" + "IOSFODNN7EXAMPLE"  # AWS docs example key, split so no literal sits in the repo
+    PH = f"[REDACTED: suspicious URL to {HOST}]"
+
+    def _presigned(self, token_len: int = 300) -> str:
+        return (
+            f"https://{self.HOST}/report.csv?X-Amz-Algorithm=AWS4-HMAC-SHA256"
+            f"&X-Amz-Credential={self.KEY}%2F20261008%2Fus-east-1%2Fs3%2Faws4_request"
+            "&X-Amz-Date=20261008T000000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host"
+            "&X-Amz-Security-Token=" + "T" * token_len + "&X-Amz-Signature=" + "a" * 64
+        )
+
+    @staticmethod
+    def _stream(text: str, step: int) -> tuple[str, list[str]]:
+        from kiro_crew.security import StreamRedactor
+
+        r = StreamRedactor()
+        emits = [r.feed(text[i : i + step]) for i in range(0, len(text), step)]
+        emits.append(r.flush())
+        return "".join(emits), emits
+
+    @pytest.mark.parametrize("step", [1, 5, 64])
+    def test_clean_links_and_text_stream_unchanged(self, step: int) -> None:
+        text = "Docs: https://example.com/docs/page?x=1, and (https://example.org/a) end."
+        out, _ = self._stream(text, step)
+        assert out == text
+
+    def _blocked(self) -> set[str]:
+        return {f"https://{self.HOST}/r?a=1&X-Amz-Credential={self.KEY}%2Fy&X-Amz-Signature=abc"}
+
+    def test_fold_removes_a_glued_tail_with_tags_inside(self) -> None:
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        text = f"x {self.PH}&X-Amz-Credential=[REDACTED: credential]%2Fy&X-Amz-Signature=abc) z"
+        assert fold_split_url_tails(text, self._blocked()) == f"x {self.PH}) z"
+
+    def test_fold_removes_the_rest_of_a_tag_the_link_match_cut(self) -> None:
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        for rest in (" credential]", " encoded credential]"):
+            text = f"x {self.PH}{rest}%2Fy&X-Amz-Signature=abc z"
+            assert fold_split_url_tails(text, self._blocked()) == f"x {self.PH} z"
+
+    def test_fold_keeps_text_after_an_address_end(self) -> None:
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        for text in (f"[a]({self.PH}) b", f"{self.PH} b", f'"{self.PH}" b', f"{self.PH}\nb"):
+            assert fold_split_url_tails(text, self._blocked()) == text
+
+    def test_fold_leaves_placeholders_on_hosts_nothing_blocked(self) -> None:
+        # Markdown glued to an echoed placeholder stays when no address on its
+        # host was blocked in this text.
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        for text in (f"Blocked: `{self.PH}`.", f"**{self.PH}**, next", f"前回は{self.PH}でした。"):
+            assert fold_split_url_tails(text, set()) == text
+            assert fold_split_url_tails(text, {"https://other.example/x?k=1"}) == text
+
+    def test_fold_removes_every_glued_tail_on_a_blocked_host(self, caplog) -> None:
+        # Default-refuse: echoed and written placeholders on a blocked host both
+        # lose their glued run, whatever their context in raw (the accepted cost),
+        # and the loss after an echoed one is logged as a count.
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        text = f"{self.PH}. Link: {self.PH}. Link: {self.PH}&X-Amz-Security-Token=T ok"
+        with caplog.at_level(logging.WARNING, logger="kiro_crew.security.exfil"):
+            out = fold_split_url_tails(text, {f"https://{self.HOST}/x?q=a&X-Amz-Security-Token=T"})
+        assert out == f"{self.PH} Link: {self.PH} Link: {self.PH} ok"
+        logged = [r.getMessage() for r in caplog.records if "split-link fold" in r.getMessage()]
+        assert logged and "Link" not in logged[0] and "Token" not in logged[0]
+
+    def test_fold_keeps_a_quoted_placeholder_that_an_address_end_closes(self) -> None:
+        # The common echoes: a placeholder inside a markdown link, quotes, or
+        # followed by a space survive on a blocked host. A placeholder glued
+        # to a backtick or other text is the accepted cost.
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        for text in (
+            f"[earlier]({self.PH}) ok",
+            f'"{self.PH}" ok',
+            f"see {self.PH} ok",
+            f"<{self.PH}> ok",
+        ):
+            assert fold_split_url_tails(text, self._blocked()) == text
+
+    def test_pieced_fold_logs_counts_without_text(self, caplog) -> None:
+        from kiro_crew.security.exfil import fold_pieced_addresses
+
+        text = f"a https://{self.HOST}/x?token=[REDACTED: credential]&t=SECRET b"
+        with caplog.at_level(logging.WARNING, logger="kiro_crew.security.exfil"):
+            assert fold_pieced_addresses(text, self._blocked()) == f"a {self.PH} b"
+        logged = [r.getMessage() for r in caplog.records if "split-link fold" in r.getMessage()]
+        assert logged and "1 tagged" in logged[0] and "SECRET" not in logged[0]
+
+    def test_pieced_fold_reads_a_nested_link_placeholder(self) -> None:
+        from kiro_crew.security.exfil import fold_pieced_addresses
+
+        inner = f"[REDACTED: suspicious URL to {self.HOST}]"
+        text = f"a https://outer.example/r?pad=x&u={inner}&X-Amz-Signature=abc b"
+        assert fold_pieced_addresses(text, {"https://outer.example/r?pad=x&u=y"}) == (
+            "a [REDACTED: suspicious URL to outer.example] b"
+        )
+
+    def test_fold_removes_a_blocked_query_glued_to_a_credential_tag(self) -> None:
+        # Only a run with a piece of four or more characters from a blocked
+        # address goes; other text glued to a credential tag stays.
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        blocked = {f"https://{self.HOST}/r?a=1&X-Amz-Signature=abcdef"}
+        tag = "[REDACTED: credential]"
+        assert (
+            fold_split_url_tails(f"k={tag}?a=1&X-Amz-Signature=abcdef ok", blocked) == f"k={tag} ok"
+        )
+        for text in (f"k={tag}. ok", f"k={tag}/unrelated-path ok", f"k={tag} ok"):
+            assert fold_split_url_tails(text, blocked) == text
+
+    def test_fold_reads_hosts_nested_inside_a_blocked_address(self) -> None:
+        # A piece cut before a nested https://inner is redacted as a link to the
+        # inner host, which the blocked outer address names in its query.
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        inner = "[REDACTED: suspicious URL to other.example]"
+        blocked = {"https://host.example/r?u=https://other.example/?d=AAAAXYZsession"}
+        text = f"see https://host.example/r?u={inner}XYZsession-data ok"
+        assert fold_split_url_tails(text, blocked) == f"see https://host.example/r?u={inner} ok"
+
+    def test_fold_reads_a_bracketed_ipv6_host(self) -> None:
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        ph = "[REDACTED: suspicious URL to [::1]]"
+        out = fold_split_url_tails(f"{ph}&sig=abc next", {"https://[::1]/x?q=1&sig=abc"})
+        assert out == f"{ph} next"
+
+    def test_one_pass_output_is_a_fixed_point_of_the_fold(self) -> None:
+        from kiro_crew.security import redact_exfiltration_urls
+        from kiro_crew.security.exfil import fold_split_url_tails
+
+        once, _ = redact_exfiltration_urls(f"a {self._presigned()}, b {self._presigned()}.")
+        # `_URL_RE` reads the glued "," and "." as part of each address.
+        assert once == f"a {self.PH} b {self.PH}"
+        assert fold_split_url_tails(once, {self._presigned()}) == once
+
+    def test_pieced_address_on_a_blocked_host_folds_whatever_its_tags_replaced(self) -> None:
+        # A credential tag can stand for a span holding query separators, so
+        # any tagged address on a blocked host folds (a kept same-host link with
+        # a masked credential is the accepted cost); other hosts stay.
+        from kiro_crew.security.exfil import fold_pieced_addresses
+
+        blocked = {f"https://{self.HOST}/r?aws_secret_access_key=S&t=1&X-Amz-Signature=abc"}
+        text = (
+            f"a https://{self.HOST}/r?[REDACTED: credential]&X-Amz-Signature=abc b"
+            f" c https://{self.HOST}/x?token=[REDACTED: credential] d"
+            " e https://other.example/r?k=[REDACTED: credential]&t=2 f"
+        )
+        assert fold_pieced_addresses(text, blocked) == (
+            f"a {self.PH} b c {self.PH} d e https://other.example/r?k=[REDACTED: credential]&t=2 f"
+        )
+        assert fold_pieced_addresses(text, set()) == text
+
+    def test_pieced_address_without_a_tag_is_kept(self) -> None:
+        from kiro_crew.security.exfil import fold_pieced_addresses
+
+        text = f"a https://{self.HOST}/r?x=1 b"
+        assert fold_pieced_addresses(text, {f"https://{self.HOST}/r?x=1"}) == text
+
+
 class TestStreamRedactor:
     """Tests for StreamRedactor (cross-chunk streaming redaction, issue 3)."""
 

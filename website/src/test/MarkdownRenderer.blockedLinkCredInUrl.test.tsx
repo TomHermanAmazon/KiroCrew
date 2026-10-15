@@ -7,9 +7,9 @@ import { expectCardListsHostRecords } from './blockedLinkCardAsserts'
 // Backend output of TestBlockedLinkCardRecords._key_split_presigned_flush
 // (test/test_chat_runner_coverage.py), byte for byte: S3 presigned URLs split
 // at &X-Amz-Date (placeholders with no record of their own) plus same-host
-// URLs whose credential was redacted per delta (records with no placeholder in
-// the text). The counts can match; the card lists every record under its own
-// address and presents none as the clicked link.
+// URLs whose credential was redacted per delta (placeholders with a record
+// each). The card lists every record under its own address and presents none
+// as the clicked link.
 it('a key-split link beside presigned starts lists every address and marks none', () => {
   const { getAllByTestId, getByTestId } = render(
     <MarkdownRenderer content={fixture.content} blockedLinks={fixture.blocked_links} slotKey="s1" />)
