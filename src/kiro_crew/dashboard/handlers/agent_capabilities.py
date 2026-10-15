@@ -108,6 +108,12 @@ async def api_member_capabilities(request: web.Request) -> web.Response:
                 {"error": exc.code, "code": exc.code, "file": exc.file},
                 status=exc.status,
             )
+        if exc.ref:
+            # The owner's own draft reference, never file bytes: the pane names
+            # the entry instead of re-deriving the shape rule client-side.
+            return web.json_response(
+                {"error": exc.code, "code": exc.code, "ref": exc.ref}, status=exc.status
+            )
         return web.json_response({"error": exc.code, "code": exc.code}, status=exc.status)
     except (OSError, ValueError):
         # Source/sidecar/parser errors may quote secret-bearing bytes or paths.

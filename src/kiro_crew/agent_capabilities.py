@@ -26,6 +26,7 @@ from kiro_crew.agent import (
     agents_spec_lock,
     kiro_agents_dir_path,
 )
+from kiro_crew.agent_capabilities_withheld import withheld_approvals as _withheld_approvals
 from kiro_crew.agent_files import DASHBOARD_AUTHOR_AGENT_FILENAME
 from kiro_crew.agent_sdk.drivers.acp import derived_agent_permissions
 from kiro_crew.agent_spec_format import (
@@ -93,6 +94,9 @@ class CapabilityError(ValueError):
         #: it (``target + ".json"``), so a hand edit cannot change it. Never a
         #: directory: the agents folder is fixed per scope and a path is not.
         self.file = ""
+        #: The draft's own approval reference a shape refusal is about, echoed
+        #: back so the pane names it without re-implementing the shape rule.
+        self.ref = ""
 
 
 def _digest(value: Any) -> str:
@@ -254,7 +258,9 @@ def _materialize(base: dict, rows: dict[str, dict], catalog: dict[str, str]) -> 
 
 def _approval_ref(ref: str) -> tuple[str, str]:
     if not ref.startswith("@") or "/" not in ref or not all(ref[1:].split("/", 1)):
-        raise CapabilityError("invalid_approval_ref", 400)
+        error = CapabilityError("invalid_approval_ref", 400)
+        error.ref = ref
+        raise error
     return tuple(ref[1:].split("/", 1))  # type: ignore[return-value]
 
 
@@ -1380,6 +1386,7 @@ class CapabilityService:
                             }
                         )
         view["impact"] = safe_view(impact)
+        view["withheld_approvals"] = _withheld_approvals(request, spec, intent, snap["catalog"])
         view["preview_token"] = self._preview_token(plans, request)
         return view
 

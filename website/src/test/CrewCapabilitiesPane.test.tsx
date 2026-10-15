@@ -431,6 +431,58 @@ describe('crew capability draft editor with mocked HTTP', () => {
     expect(screen.getByText('This change grants more automatic approval.')).toBeInTheDocument()
   })
 
+  it('names each approval the save will withhold, and why, before the save', async () => {
+    server.use(http.post(`${endpoint}/preview`, () => HttpResponse.json({ ...view, preview_token: 'signed-preview', impact: [], withheld_approvals: [
+      { section: 'autoApprove', id: '@search/list', reason: 'governed' },
+      { section: 'allowedTools', id: '@absent/tool', reason: 'not_connected' },
+      { section: 'autoApprove', id: '@kirocrew-mate/ask', reason: 'managed' },
+      { section: 'autoApprove', id: '@other/ask', reason: 'unexplained' },
+    ] })))
+    mount(); await ready()
+    fireEvent.click(screen.getByRole('tab', { name: 'Auto-Approved' }))
+    await pickState('Search list', 'Override')
+    fireEvent.change(screen.getByLabelText('Exact tool reference, such as @server/tool'), { target: { value: '@absent/tool' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add to draft' }))
+    await review()
+    const note = screen.getByTestId('capability-preview-withheld')
+    expect(note).toHaveTextContent('Saving will not auto-approve these tools for crewA, so calls to them will still ask for approval.')
+    expect(note).toHaveTextContent('@search/list: A security profile governs this server, so Kiro Crew withholds the approval.')
+    expect(note).toHaveTextContent('@absent/tool: crewA has no enabled connection to this server. Add or enable it in the MCP Servers tab.')
+    expect(note).toHaveTextContent('@kirocrew-mate/ask: Kiro Crew rebuilds this connection itself, and the rebuilt connection keeps no approvals.')
+    // The note leads the review, so the per-member summary follows from it.
+    const members = screen.getByTestId('capability-preview-members')
+    expect(note.compareDocumentPosition(members) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The not-connected fix opens the tab it names.
+    expect(note).toHaveTextContent('@other/ask: Kiro Crew will not save this approval, and no known setting explains why. Report this as a bug.')
+    // The member name renders as code, and a fully withheld draft's summary says why nothing changes.
+    expect(within(note).getAllByText('crewA', { selector: 'code' }).length).toBeGreaterThan(0)
+    expect(members).toHaveTextContent('crewA: saving changes nothing, because none of these approvals can be kept.')
+    expect(members).not.toHaveTextContent('no effective value changes')
+    fireEvent.click(within(note).getByRole('button', { name: 'Open the MCP Servers tab (keeps your draft)' }))
+    expect(screen.getByRole('tab', { name: 'MCP Servers', exact: true })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('names a refused approval reference instead of the generic retry copy', async () => {
+    server.use(http.post(`${endpoint}/preview`, () => HttpResponse.json({ error: 'invalid_approval_ref', code: 'invalid_approval_ref', ref: '@search' }, { status: 400 })))
+    mount(); await ready()
+    fireEvent.click(screen.getByRole('tab', { name: 'Auto-Approved' }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'Approval list' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'MCP server approval list' }))
+    fireEvent.change(screen.getByLabelText('Exact tool reference, such as @server/tool'), { target: { value: '@search' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add to draft' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes', exact: true }))
+    expect(await screen.findByText(/^@search is not a valid approval entry\. An MCP server approval needs the @server\/tool form/)).toBeInTheDocument()
+    expect(screen.queryByText('The capabilities request failed. Your draft is kept. Reload from server and retry.')).toBeNull()
+  })
+
+  it('names the code of any other refused draft shape', async () => {
+    server.use(http.post(`${endpoint}/preview`, () => HttpResponse.json({ error: 'invalid_set_value', code: 'invalid_set_value' }, { status: 400 })))
+    mount(); await ready()
+    await pickState('Search', 'Removed')
+    fireEvent.click(screen.getByRole('button', { name: 'Review changes', exact: true }))
+    expect(await screen.findByText('The server refused this draft (invalid_set_value). Your draft is kept. Reloading will not change this: edit or discard the draft.')).toBeInTheDocument()
+  })
+
   it('hides an empty approval heading without removing the list choice or draft rows', async () => {
     view.rows = view.rows.filter(row => row.section !== 'autoApprove')
     mount(); await ready()

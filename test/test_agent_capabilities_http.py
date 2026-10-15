@@ -51,6 +51,29 @@ async def test_http_invalid_json_preserves_saved_capabilities(
 
 
 @pytest.mark.asyncio
+async def test_http_invalid_approval_ref_names_the_refused_entry(editor, capability_app):
+    from aiohttp.test_utils import TestClient, TestServer
+
+    service, _, _, _ = editor
+    app, _ = capability_app
+    body = {
+        "revision": (await asyncio.to_thread(service.get, "A"))["revision"],
+        "enroll": True,
+        "operations": [{"section": "autoApprove", "id": "@search", "action": "set", "value": True}],
+        "accept_parent": [],
+        "accept_members": [],
+    }
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post("/api/agents/A/capabilities/preview", json=body)
+        assert response.status == 400
+        assert await response.json() == {
+            "error": "invalid_approval_ref",
+            "code": "invalid_approval_ref",
+            "ref": "@search",
+        }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["reset", "publish"])
 async def test_http_inherited_actions_reject_wrong_member(editor, capability_app, action):
     from aiohttp.test_utils import TestClient, TestServer

@@ -661,10 +661,24 @@ Any other 409 refuses the draft itself and repeats on reload, so the pane
 names it instead: `alternate_permissions_require_review` (an approval edit on
 an agent file whose permission settings Crew did not derive) gets its own
 copy, and every other code is shown by name with the draft kept.
-Only a Review or Save 409 gets that draft-refusal copy. A 409 on the load
+A Review or Save 400 with a code is a refusal of the draft's own shape and
+also repeats on reload, so it gets the same named-code copy;
+`invalid_approval_ref` has its own copy naming the refused entry, which the
+400 body carries as `ref`.
+Only a Review or Save 409 or 400 gets that draft-refusal copy. A 409 on the load
 itself (`parent_missing`, `foreign_private_copy`, `private_template_shadowed`,
 `source_unreadable`) can arrive with no draft at all, so it keeps the load
 notice.
+
+The preview view carries `withheld_approvals`: each `allowedTools` or
+`autoApprove` entry the draft sets to Override that the projected spec will not
+carry, as `{section, id, reason}`. `reason` is `governed` (the governance
+filter left a remove tombstone), `not_connected` (the projected spec has no
+enabled MCP entry for that server: missing or `disabled`), `managed` (a
+`MEMBER_PLATFORM_SERVERS` server, whose transport is rebuilt without
+approvals) or `unexplained` (none of those). The pane lists them first in the
+review; when any is `not_connected` it offers a button that opens the MCP
+Servers tab with the draft kept.
 
 The GET, preview and PUT views carry `backend_warning`: `null`, or
 `{code, backend, setting}` when a member chat on the backend that setting

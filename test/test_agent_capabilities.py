@@ -725,6 +725,108 @@ def test_policy_withheld_approval_never_resurrects_on_relaxation(editor):
         set_context(original)
 
 
+def _approval_preview(service, *refs):
+    body = {
+        "revision": service.get("A")["revision"],
+        "enroll": True,
+        "operations": [
+            {"section": section, "id": ref, "action": "set", "value": True} for section, ref in refs
+        ],
+        "accept_parent": [],
+        "accept_members": [],
+    }
+    return service.preview("A", body)
+
+
+def test_preview_names_a_governance_withheld_approval(editor):
+    from dataclasses import replace
+
+    from kiro_crew.platform.context import current_context, set_context
+    from kiro_crew.platform.governance import parse_policy
+
+    service, _, _, _ = editor
+    original = current_context()
+    policy = parse_policy(
+        {"version": 1, "boot": {"fail_closed": True}, "mcp": {"mode": "deny", "deny": ["@search"]}}
+    )
+    try:
+        set_context(replace(original, governance=policy))
+        preview = _approval_preview(
+            service, ("autoApprove", "@search/find"), ("allowedTools", "@search/find")
+        )
+    finally:
+        set_context(original)
+    assert preview["withheld_approvals"] == [
+        {"section": "autoApprove", "id": "@search/find", "reason": "governed"},
+        {"section": "allowedTools", "id": "@search/find", "reason": "governed"},
+    ]
+
+
+def test_preview_names_an_approval_for_a_server_the_member_lacks(editor):
+    service, _, _, _ = editor
+    preview = _approval_preview(
+        service,
+        ("autoApprove", "@absent/tool"),
+        ("allowedTools", "@absent/tool"),
+        ("autoApprove", "@search/find"),
+        ("allowedTools", "read"),
+    )
+    assert preview["withheld_approvals"] == [
+        {"section": "autoApprove", "id": "@absent/tool", "reason": "not_connected"},
+        {"section": "allowedTools", "id": "@absent/tool", "reason": "not_connected"},
+    ]
+
+
+def test_preview_names_an_approval_for_a_disabled_connection(editor):
+    service, _, specs, parent = editor
+    parent["mcpServers"]["search"]["disabled"] = True
+    (specs / "parent.json").write_text(json.dumps(parent))
+    preview = _approval_preview(service, ("allowedTools", "@search/find"))
+    assert preview["withheld_approvals"] == [
+        {"section": "allowedTools", "id": "@search/find", "reason": "not_connected"},
+    ]
+
+
+def test_withheld_reason_is_read_from_the_projected_spec():
+    from kiro_crew.agent_capabilities import SECTIONS, _withheld_approvals
+
+    refs = ("@gone/a", "@off/a", "@kept/a", "@kirocrew-mate/a", "@other/a", "@ruled/a")
+    request = {
+        "operations": [
+            {"section": "autoApprove", "id": ref, "action": "set", "value": True} for ref in refs
+        ]
+    }
+    spec = {
+        "mcpServers": {
+            "off": {"command": "off", "disabled": True},
+            "kept": {"command": "kept", "autoApprove": ["a"]},
+            "kirocrew-mate": {"command": "mate"},
+            "other": {"command": "other"},
+            "ruled": {"command": "ruled"},
+        }
+    }
+    intent = {"overrides": {section: {} for section in SECTIONS}}
+    intent["overrides"]["autoApprove"]["@ruled/a"] = {"action": "remove"}
+    assert _withheld_approvals(request, spec, intent, {}) == [
+        {"section": "autoApprove", "id": "@gone/a", "reason": "not_connected"},
+        {"section": "autoApprove", "id": "@off/a", "reason": "not_connected"},
+        {"section": "autoApprove", "id": "@kirocrew-mate/a", "reason": "managed"},
+        {"section": "autoApprove", "id": "@other/a", "reason": "unexplained"},
+        {"section": "autoApprove", "id": "@ruled/a", "reason": "governed"},
+    ]
+
+
+def test_preview_refuses_a_server_only_auto_approve_with_a_400(editor):
+    service, _, _, _ = editor
+    with pytest.raises(CapabilityError) as raised:
+        _approval_preview(service, ("autoApprove", "@search"))
+    assert (raised.value.code, raised.value.status, raised.value.ref) == (
+        "invalid_approval_ref",
+        400,
+        "@search",
+    )
+
+
 def test_project_parent_is_pinned_and_never_falls_back(editor, monkeypatch):
     service, home, specs, parent = editor
     project = home / "project"

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { ApiError } from '../../api/apiError'
 import { capabilityKey, crewCapabilitiesApi, crewCapabilitiesKey, type CapabilityBackendWarning, type CapabilityDraft, type CapabilityOperation, type CapabilityPreview, type CapabilityRef, type CapabilityRow, type CapabilitySection } from '../../api/crewCapabilities'
 import { Badge, Btn, Checkbox, Input, PanelSectionHeader, SendBtn } from '../ui'
@@ -34,10 +34,21 @@ const DETACH_BLOCKED_COPY = {
   detach_removal_unkept: 'crewCapabilities.detachRemoval',
 } as const
 
-function refusedFile(body: string | undefined): string {
+/** Why a reviewed approval will not land, one line per backend reason. */
+const WITHHELD_REASON_COPY = {
+  governed: 'crewCapabilities.withheldGoverned',
+  not_connected: 'crewCapabilities.withheldNotConnected',
+  managed: 'crewCapabilities.withheldManaged',
+  unexplained: 'crewCapabilities.withheldUnexplained',
+} as const
+
+/** A string field a refusal body carries: `file` (the agent file an
+ * `unreviewable_drift` names) or `ref` (the draft entry an
+ * `invalid_approval_ref` names). Empty when absent or unparsable. */
+function refusalField(body: string | undefined, key: 'file' | 'ref'): string {
   try {
-    const parsed = JSON.parse(body || '{}') as { file?: unknown }
-    return typeof parsed.file === 'string' ? parsed.file : ''
+    const value = (JSON.parse(body || '{}') as Record<string, unknown>)[key]
+    return typeof value === 'string' ? value : ''
   } catch {
     return ''
   }
@@ -179,7 +190,7 @@ export default function CrewCapabilitiesPane({ member, members = [], hidden, onD
     ? DETACH_BLOCKED_COPY[errorCode as keyof typeof DETACH_BLOCKED_COPY]
     : null
   const errorMessage = refused && error instanceof ApiError
-    ? t('crewCapabilities.unreviewableDrift', { member, file: refusedFile(error.body) })
+    ? t('crewCapabilities.unreviewableDrift', { member, file: refusalField(error.body, 'file') })
     : detachRefusal
       ? t(detachRefusal, { name: member })
       : detachFailed && draftConflict && errorCode
@@ -188,6 +199,17 @@ export default function CrewCapabilitiesPane({ member, members = [], hidden, onD
         ? t('crewCapabilities.permissionsReview', { member })
         : draftConflict && errorCode && !isStaleCode(errorCode)
           ? t('crewCapabilities.refused', { code: errorCode })
+          // A 400 is a refusal of the draft's own shape, which a Reload repeats.
+          // Name the code (and the fix for the one owners type by hand) rather
+          // than the generic "retry" copy, which loops.
+          : !query.error && error instanceof ApiError && error.status === 400 && errorCode
+            ? errorCode === 'invalid_approval_ref'
+              // The refusal names the entry it rejected; with none, the generic
+              // refusal copy still names the code.
+              ? refusalField(error.body, 'ref')
+                ? t('crewCapabilities.invalidApprovalRef', { ref: refusalField(error.body, 'ref') })
+                : t('crewCapabilities.refused', { code: errorCode })
+              : t('crewCapabilities.refused', { code: errorCode })
           : t(conflict ? 'crewCapabilities.stale' : error instanceof ApiError && [404, 405, 501].includes(error.status) ? 'crewCapabilities.unsupported' : 'crewCapabilities.failed')
   const enabled = !!view && view.schema_version === 1 && view.template.available && !query.isError && (view.mode === 'inherited' || draft?.enroll === true)
   // The member's agent file changed outside this page, so new chats refuse to
@@ -360,10 +382,22 @@ export default function CrewCapabilitiesPane({ member, members = [], hidden, onD
           {draft && draft.revision !== view.revision && <Btn disabled={busy} onClick={() => edit(current => ({ ...current, revision: view.revision }))}>{t('crewCapabilities.rebase')}</Btn>}
           {preview && <section className="rounded border border-border bg-bg-accent p-3 text-[13px]" aria-label={t('crewCapabilities.previewHeading')}>
             <PanelSectionHeader label={t('crewCapabilities.previewHeading')} />
+            {/* First, so the owner reads why before the per-member summary. A
+                member whose whole draft is withheld gets a summary line that says
+                so, instead of a bare "no effective value changes". The member
+                name renders as code so a name like `default` reads as a name. */}
+            {(preview.withheld_approvals ?? []).length > 0 && <div role="note" className="mb-2 break-words text-[13px] text-warn" data-testid="capability-preview-withheld">
+              <p><Trans i18nKey="crewCapabilities.withheldIntro" values={{ name: member }} components={[<code key="n" translate="no" />]} /></p>
+              <ul className="mt-1 list-disc pl-5">{(preview.withheld_approvals ?? []).map(item => <li key={capabilityKey(item)}>
+                <code className="break-all" translate="no">{item.id}</code>: <Trans i18nKey={WITHHELD_REASON_COPY[item.reason]} values={{ name: member }} components={[<code key="n" translate="no" />]} />
+              </li>)}</ul>
+              {/* The not-connected fix lives on this page; open its tab like BackendWarning does. */}
+              {(preview.withheld_approvals ?? []).some(item => item.reason === 'not_connected') && <Btn className="mt-2" onClick={() => setCategory('mcpServers')} data-testid="capability-withheld-open-tab">{t('crewCapabilities.withheldOpenTab')}</Btn>}
+            </div>}
             <ul className="mb-2 space-y-1" data-testid="capability-preview-members">{previewMembers.map(name => {
               const count = preview.impact.filter(item => item.member === name).length
               return <li key={name} className="break-words">
-                {count > 0 ? t('crewCapabilities.memberChanged', { name, count }) : t('crewCapabilities.memberUnchanged', { name })}
+                {count > 0 ? t('crewCapabilities.memberChanged', { name, count }) : name === member && (preview.withheld_approvals ?? []).length > 0 ? <Trans i18nKey="crewCapabilities.memberWithheldOnly" values={{ name }} components={[<code key="n" translate="no" />]} /> : t('crewCapabilities.memberUnchanged', { name })}
                 {name === member && keptRows.length > 0 && <>
                   <span className="mt-1 block">{t('crewCapabilities.memberKeptRows', { name })}</span>
                   <ul className="mt-1 list-disc pl-5" data-testid="capability-preview-kept-rows">{keptRows.map(row => <li key={capabilityKey(row)}><code className="break-all" translate="no">{row.section}: {row.id}</code> <Badge variant="muted">{t(row.state === 'removed' ? 'crewCapabilities.staysRemoved' : capabilityLabels.state[row.state])}</Badge></li>)}</ul>
