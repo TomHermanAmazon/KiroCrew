@@ -36,6 +36,24 @@ const BUNDLED_KIRO_CLI_POSIX_ENTRY = "kiro-cli-chat";
 // its version inside it is not one to build every session on.
 const BUNDLED_KIRO_CLI_PROBE_MS = 10_000;
 
+// Where packaging/build-desktop.sh (BUNDLE_KAS) stages the pinned KAS engine
+// bundle: `backend-dist/kas-<arch>/` on a universal macOS build (one Node per
+// architecture, selected like `kirocrew-backend-<arch>`), `backend-dist/kas/`
+// on a single-arch build. Each holds `<version>/{bundle,node,install.json}`,
+// the exact layout `kirocrew kas install` lays down under the data home, so the
+// backend reads it with the same code (acp.kas_bundle.installed_bundle, via the
+// env var below) as a SECOND root after the data home's own install.
+const BUNDLED_KAS_SUBDIR = ["backend-dist", "kas"];
+const BUNDLED_KAS_ARCH_SUFFIX = { arm64: "arm64", x64: "x64" };
+// The two files inside that root this side reads: the provenance file the build
+// writes beside the version directory, and that version's install record, which
+// names the Node binary the probe runs (spelling owned by the backend's
+// `_INSTALL_RECORD_NAME`; the version is whatever the build staged, which is
+// the backend's pin -- this side never carries the pin itself).
+const BUNDLED_KAS_VERSION_FILE = "BUNDLED-VERSION";
+const BUNDLED_KAS_RECORD = "install.json";
+const BUNDLED_KAS_PROBE_MS = 10_000;
+
 /**
  * Build a gateway child environment without mutating Electron's process.env.
  *
@@ -207,9 +225,121 @@ function bundledKiroCliEnvironment(fs, path, resourcesPath, probe) {
   return { KIROCREW_BUNDLED_KIRO_DIR: bundledDir, KIRO_NO_AUTO_UPDATE: "1" };
 }
 
+/**
+ * Point the gateway at the KAS engine bundle staged into the app's resources.
+ *
+ * Same contract as `bundledKiroCliEnvironment`, for the engine `agent.kas_bundle`
+ * spawns: `KIROCREW_BUNDLED_KAS_DIR` names the staged root ONLY when the
+ * directory shipped, carries the pinned version's install record, and that
+ * record's Node answers `--version` on THIS machine. A build without the payload
+ * (`BUNDLE_KAS=0`, a source checkout), a root for another architecture, or a
+ * Node this host cannot run all spread nothing: the backend then sees only the
+ * data home's `engines/kas`, exactly as an unbundled build does, and a user who
+ * turned the switch on gets the refusal that names `kirocrew kas install`
+ * instead of every session failing on a binary the user never chose.
+ *
+ * The root is per architecture on a universal macOS build because Node ships no
+ * universal binary; the engine's own JS is shared. The arch-suffixed root is
+ * tried first, then the unsuffixed one a single-arch build stages, so a
+ * universal bundle never falls back to a wrong-arch Node.
+ *
+ * Exports only the directory: the backend owns the version it looks up (its
+ * pin, or `KIROCREW_KAS_VERSION`) and the entry names inside, and ranks the data
+ * home's own install ahead of this one, so `kirocrew kas install` and a
+ * `--unpinned` test install keep working in the app.
+ *
+ * @param {Pick<typeof import("fs"), "statSync" | "readFileSync">} fs
+ * @param {Pick<typeof import("path"), "join">} path
+ * @param {string | undefined} resourcesPath
+ * @param {{
+ *   arch?: string,
+ *   spawnSync?: typeof import("child_process").spawnSync,
+ *   env?: NodeJS.ProcessEnv,
+ *   log?: (line: string) => void,
+ * }} [probe]  How to ask the staged Node for its version. Omitted (the unit
+ *   tests' shape) means "trust the directory".
+ * @returns {NodeJS.ProcessEnv}
+ */
+/**
+ * Whether `value` is a relative path that stays inside the directory it is joined
+ * onto: no absolute form (POSIX or drive-lettered), no empty, `.` or `..` segment.
+ *
+ * The staged root is sealed read-only for sandboxed children by the backend
+ * (`sandbox_tiers._resolved_install_root_targets`), and this is the second fence over the
+ * same two fields: the version `BUNDLED-VERSION` names and the `node_bin` the
+ * install record names are both joined onto the staged tree and the result is
+ * EXECUTED by this process, outside any sandbox. A value that could leave the tree
+ * is refused before it is joined, so a record that was somehow rewritten can only
+ * point at a file the build itself staged.
+ *
+ * @param {unknown} value
+ * @param {{ single?: boolean }} [opts]  `single`: exactly one segment (a version).
+ */
+function staysWithinStagedTree(value, opts) {
+  if (typeof value !== "string" || !value) return false;
+  const segments = value.split(/[\\/]/);
+  if (opts && opts.single && segments.length !== 1) return false;
+  if (/^[A-Za-z]:$/.test(segments[0])) return false;
+  return segments.every((seg) => seg !== "" && seg !== "." && seg !== "..");
+}
+
+function bundledKasEnvironment(fs, path, resourcesPath, probe) {
+  if (!resourcesPath) return {};
+  const suffix = BUNDLED_KAS_ARCH_SUFFIX[(probe && probe.arch) || process.arch];
+  const roots = [];
+  if (suffix) roots.push(path.join(resourcesPath, ...BUNDLED_KAS_SUBDIR.slice(0, -1), `kas-${suffix}`));
+  roots.push(path.join(resourcesPath, ...BUNDLED_KAS_SUBDIR));
+  for (const root of roots) {
+    let record, versionDir;
+    try {
+      if (!fs.statSync(root).isDirectory()) continue;
+      const version = fs.readFileSync(path.join(root, BUNDLED_KAS_VERSION_FILE), "utf8").trim();
+      if (!staysWithinStagedTree(version, { single: true })) continue;
+      versionDir = path.join(root, version);
+      record = JSON.parse(fs.readFileSync(path.join(versionDir, BUNDLED_KAS_RECORD), "utf8"));
+    } catch {
+      continue;
+    }
+    if (!record || !staysWithinStagedTree(record.node_bin)) {
+      if (probe && probe.log) {
+        probe.log(
+          `bundled KAS engine's install record at ${versionDir} does not name a Node inside ` +
+            "the staged tree; the bundle route will use the data home's own install, if any",
+        );
+      }
+      continue;
+    }
+    if (probe && probe.spawnSync) {
+      const node = path.join(versionDir, record.node_bin);
+      const result = probe.spawnSync(node, ["--version"], {
+        env: probe.env || {},
+        timeout: BUNDLED_KAS_PROBE_MS,
+        windowsHide: true,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      if (result.error || result.status !== 0) {
+        const why = result.error
+          ? result.error.message
+          : `exit ${result.status}${result.signal ? ` signal ${result.signal}` : ""}`;
+        if (probe.log) {
+          probe.log(
+            `bundled KAS engine's Node at ${node} does not run here (${why}); ` +
+              "the bundle route will use the data home's own install, if any",
+          );
+        }
+        return {};
+      }
+    }
+    return { KIROCREW_BUNDLED_KAS_DIR: root };
+  }
+  return {};
+}
+
 module.exports = {
   buildGatewayEnvironment,
   bundledKiroCliEnvironment,
+  bundledKasEnvironment,
+  staysWithinStagedTree,
   gatewayBytecodeEnvironment,
   GATEWAY_UTF8_ENV,
 };

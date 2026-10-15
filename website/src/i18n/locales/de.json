@@ -13227,6 +13227,7 @@
         "toggle_label": "Integrierte KAS-Engine verwenden",
         "toggle_description": "Führt die KAS-Engine-Version aus, mit der diese {{productName}}-Version getestet wurde, ohne separate kiro-cli-Installation. Meldet sich mit dem Kiro-Konto oben an. Der Wechsel gilt, sobald {{productName}} neu startet.",
         "installed": "Integrierte Engine {{version}} installiert",
+        "installed_bundled": "Integrierte Engine {{version}} installiert (in der App enthalten)",
         "saved_restart_pending": "Gespeichert. {{productName}} läuft noch mit der bisherigen Engine-Route; der Wechsel passiert beim Neustart: Einstellungen → Über → Gateway neu starten.",
         "not_installed": "Integrierte Engine {{version}} ist noch nicht installiert.",
         "install": "KAS-Engine installieren",

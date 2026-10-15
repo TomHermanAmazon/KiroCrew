@@ -14,6 +14,7 @@ const {
 const {
   buildGatewayEnvironment,
   bundledKiroCliEnvironment,
+  bundledKasEnvironment,
   gatewayBytecodeEnvironment,
 } = require("./gateway-env");
 const {
@@ -1513,6 +1514,14 @@ function createGatewaySupervisor({
         // install (see gateway-env.js).
         ...bundledKiroCliEnvironment(fs, path, processObj.resourcesPath, {
           platform: processObj.platform,
+          spawnSync: defaultSpawnSync,
+          env: cleanEnv,
+          log: glog,
+        }),
+        // The KAS engine bundle staged beside it (BUNDLE_KAS); same rule: only
+        // when it shipped for this architecture AND its Node runs here.
+        ...bundledKasEnvironment(fs, path, processObj.resourcesPath, {
+          arch: processObj.arch,
           spawnSync: defaultSpawnSync,
           env: cleanEnv,
           log: glog,

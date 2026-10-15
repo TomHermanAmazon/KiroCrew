@@ -203,7 +203,8 @@ def _status(_args: argparse.Namespace) -> int:
     if installed is None:
         print(f"installed:     KAS {runs} is not installed  (run `kirocrew kas install`)")
         return 0 if not cfg.kas_bundle else 1
-    print(f"installed:     KAS {installed.version}, Node {installed.node_version or '?'}")
+    where = "  (built into the app)" if installed.bundled else ""
+    print(f"installed:     KAS {installed.version}, Node {installed.node_version or '?'}{where}")
     print(f"  engine: {installed.acp_server}")
     print(f"  node:   {installed.node_bin}")
     return 0

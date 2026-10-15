@@ -13439,6 +13439,7 @@
         "toggle_label": "Usar o mecanismo KAS integrado",
         "toggle_description": "Executa a versão do mecanismo KAS testada com esta versão do {{productName}}, sem instalar o kiro-cli separadamente. Entra com a conta Kiro acima. A troca passa a valer quando o {{productName}} reinicia.",
         "installed": "Mecanismo integrado {{version}} instalado",
+        "installed_bundled": "Mecanismo integrado {{version}} instalado (incluído no aplicativo)",
         "saved_restart_pending": "Salvo. O {{productName}} ainda está usando a rota do mecanismo anterior; a troca acontece ao reiniciar: Configurações → Sobre → Reiniciar o gateway.",
         "not_installed": "O mecanismo integrado {{version}} ainda não está instalado.",
         "install": "Instalar o mecanismo KAS",
