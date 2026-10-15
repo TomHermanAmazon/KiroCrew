@@ -63,7 +63,7 @@ export default function LibraryPage() {
   const [showAll, setShowAll] = usePersistedBool('mc-apps-library-show-all', false)
   const {
     apps, appsLoading, appsError, registryError,
-    browseApps, installedApps, disabledCount, updatables, announceAppsChanged,
+    browseApps, installedApps, disabledCount, updatables, announceAppsChanged, sources,
   } = useAppsData({ showAll })
 
   const [query, setQuery] = useState('')
@@ -80,7 +80,7 @@ export default function LibraryPage() {
   const {
     setError, displayError, dismissError,
     openDetail, updateApp, trustTarget, runEnable, trust,
-  } = useAppActions({ apps, browseApps, appsError, registryError, announceAppsChanged })
+  } = useAppActions({ apps, browseApps, appsError, registryError, announceAppsChanged, sources })
 
   // Transient success surface for the shared update hook: the hook reports
   // outcomes, this page owns display + auto-dismiss (same 4s the other

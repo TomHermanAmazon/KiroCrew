@@ -19,15 +19,16 @@ import { i18nT } from '../../i18n/t'
 import { recordEvent } from '../../rum'
 import { isSessionApprovalConsentRequiredError, useTrustGate } from '../../components/appstore/TrustAppModal'
 import type { TrustAppTarget } from '../../components/appstore/TrustAppModal'
+import { registryTierFor } from '../../components/appstore/registryTier'
 import type { AppsData } from './useAppsData'
 
 type AppActionsInput = Pick<
   AppsData,
-  'apps' | 'browseApps' | 'appsError' | 'registryError' | 'announceAppsChanged'
+  'apps' | 'browseApps' | 'appsError' | 'registryError' | 'announceAppsChanged' | 'sources'
 >
 
 export function useAppActions({
-  apps, browseApps, appsError, registryError, announceAppsChanged,
+  apps, browseApps, appsError, registryError, announceAppsChanged, sources,
 }: AppActionsInput) {
   const navigate = useNavigate()
   const [error, setError] = useState('')
@@ -52,7 +53,8 @@ export function useAppActions({
 
   // Provenance the consent modal shows. For an installed app, the server-bound
   // source wins over today's registry row; for an install prompt, the registry's
-  // server-resolved clone target is the authority.
+  // server-resolved clone target is the authority. The listing registry's review
+  // tier rides along so the gate can say when that listing was not vetted.
   const trustTarget = (name: string): TrustAppTarget => {
     const row = browseApps.find(a => a.name === name)
     const installed = apps.find(a => a.name === name)
@@ -63,6 +65,9 @@ export function useAppActions({
       origin: installed.origin,
       _registry: row?._registry,
       sessionApproval: installed.manifest.permissions?.sessionApproval === true,
+      // A local install has no listing, so it carries no registry claim even
+      // when a registry row happens to share its name (the detail page's rule).
+      ...(installed.origin === 'local' ? {} : registryTierFor(row?._registry, sources)),
     }
     if (row) return {
       name: row.name,
@@ -71,6 +76,7 @@ export function useAppActions({
       origin: row.origin,
       _registry: row._registry,
       sessionApproval: row.manifest?.permissions?.sessionApproval === true,
+      ...registryTierFor(row._registry, sources),
     }
     return { name }
   }

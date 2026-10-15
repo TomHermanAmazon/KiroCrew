@@ -169,7 +169,7 @@ function DiscoverPageBody() {
   const {
     setError, displayError, dismissError,
     openDetail, getApp, updateApp, trustTarget, runEnable, trust,
-  } = useAppActions({ apps, browseApps, appsError, registryError, announceAppsChanged })
+  } = useAppActions({ apps, browseApps, appsError, registryError, announceAppsChanged, sources })
 
   // Transient success surface for the shared update hook: the hook reports
   // outcomes, this page owns display + auto-dismiss (the Library's 4s).
