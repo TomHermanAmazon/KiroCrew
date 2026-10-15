@@ -123,6 +123,72 @@ export function deduplicateByMid(msgs: ChatMessage[]): ChatMessage[] {
   return result
 }
 
+/** Carry a settled `mcp_oauth` banner forward over a stale snapshot copy that
+ *  would revive its retired Authorize link (#20833).
+ *
+ *  The backend upserts an `mcp_oauth` banner in place by its server `meta.mid`,
+ *  keeping the same `role` and `ts`: a newer request supersedes it
+ *  (`_supersede_open_mcp_oauth_banners` drops `oauth_url`, sets `superseded`),
+ *  and the read-time gate expires a dead-child one (`oauth_url: ""`, `expired`).
+ *  A reconnect / slot switch then fetches a BOUNDED snapshot taken BEFORE that
+ *  transition, still carrying the OPEN copy (a live `oauth_url`, no terminal
+ *  flag) under the SAME `(mid, role, ts)`. The slot-detail merge appends that
+ *  stale page copy AFTER the live settled row, so `deduplicateByMid` — which
+ *  keeps the LAST occurrence — revives the dead Authorize button, which walks
+ *  the user to a loopback callback port that can redeem nothing.
+ *
+ *  This carries each settled prior banner's content/cls/meta forward onto any
+ *  merged copy of the same mid that is still open, BEFORE `deduplicateByMid`
+ *  collapses the pair, so the surviving row keeps the terminal state the user
+ *  already saw. Keyed by `mid` only — the backend's own upsert key.
+ *
+ *  A sibling of `#20818`'s stop-event rule applied at the same two merge sites
+ *  (`slotRefresh.ts`, `slotSwitch.ts`); deliberately scoped to `mcp_oauth` and
+ *  independent of it. Returns `merged` unchanged (same reference) when nothing
+ *  is carried, so a caller can skip the write.
+ */
+export function preserveSettledMcpOauth(existing: ChatMessage[], merged: ChatMessage[]): ChatMessage[] {
+  const oauthMid = (m: ChatMessage): string | undefined => {
+    if (m.role !== 'mcp_oauth') return undefined
+    const mid = m.meta?.mid
+    return typeof mid === 'string' && mid ? mid : undefined
+  }
+  // Terminal states the backend stamps on a retired banner. An open banner
+  // carries none of them (and still carries a live `oauth_url`).
+  const isSettled = (m: ChatMessage): boolean => {
+    const meta = m.meta as { superseded?: unknown; expired?: unknown; completed?: unknown; failed?: unknown } | undefined
+    return !!(meta?.superseded || meta?.expired || meta?.completed || meta?.failed)
+  }
+
+  const settledPrior = new Map<string, ChatMessage>()
+  for (const m of existing) {
+    const id = oauthMid(m)
+    if (id && isSettled(m)) settledPrior.set(id, m)
+  }
+  if (!settledPrior.size) return merged
+
+  let changed = false
+  const result: ChatMessage[] = []
+  for (const m of merged) {
+    const id = oauthMid(m)
+    if (id !== undefined && !isSettled(m) && settledPrior.has(id)) {
+      // Carry the settled prior row's rendered state forward in place. The
+      // prior meta is AUTHORITATIVE, not merged under the open copy's: the
+      // supersede/expire transition DROPS `oauth_url`, so spreading the open
+      // copy's meta on top would keep its dead link and only add the terminal
+      // flag — a hybrid row that still renders the revived Authorize button.
+      // Identity (`mid`, `role`, `ts`) already matches, so replacing content /
+      // cls / meta wholesale keeps the row the same row for `deduplicateByMid`.
+      const prior = settledPrior.get(id)!
+      result.push({ ...m, content: prior.content, cls: prior.cls, meta: { ...(prior.meta || {}) } })
+      changed = true
+      continue
+    }
+    result.push(m)
+  }
+  return changed ? result : merged
+}
+
 /** Tail window (rows) for a backward `sendId` scan. Shared by the echo
  *  reconcile and the response-confirm path so the two cannot drift into
  *  disagreeing about which bubbles are still addressable by their send id. */
