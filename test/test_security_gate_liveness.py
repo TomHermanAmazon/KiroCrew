@@ -335,7 +335,12 @@ def _url_payload_command(n: int) -> str:
 #: Raised again, from 29,293, for the ``engines`` leaf in ``paths.py``: the KAS
 #: engine bundle the gateway installs and later executes joins the file-tool floor
 #: beside ``playwright-cli`` -- one entry and its reason. No matcher moved.
-_PACKAGE_LINE_BUDGET = 29_296
+#:
+#: Raised again, from 29,296, for ``redaction_switch.code_text``: a scope that stands
+#: pass 3 down over text known to be code, the flag it sets, the one place pass 3
+#: reads it, and the credential-label pattern that keeps a labelled value judged inside
+#: the scope. No credential branch, gate verdict or other pass moved.
+_PACKAGE_LINE_BUDGET = 29_357
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second

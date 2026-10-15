@@ -37,7 +37,7 @@ from collections.abc import Callable, Iterator
 from typing import NamedTuple
 
 from kiro_crew.credential_patterns import AWS_KEY_ID, JWT_MULTI_SEGMENT
-from kiro_crew.security.redaction_switch import credential_pass_bypassed
+from kiro_crew.security.redaction_switch import bare_secret_pass_enabled, credential_pass_bypassed
 
 # ── Credential Output Redaction ──
 # Catches raw credential patterns in LLM output / tool results,
@@ -608,6 +608,20 @@ _BARE_SECRET_RUN_RE = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}(?![A-Za-
 # (rather than ">=40") is what lets the structural gates below cleanly separate
 # real keys from 64-char sha256 hex, base64 document blobs, etc.
 _SECRET_KEY_LEN = 40
+
+#: A credential label right before a value: a name holding a credential noun, then a short
+#: run of white space, quotes, ``=`` and ``:`` that holds a ``=`` or ``:``. In code text
+#: (``redaction_switch.code_text``) pass 3 judges only a run that follows one, so
+#: ``password = "..."`` is still judged, across a line break too, while an alphabet named
+#: ``keyStr`` or ``ART_CHARS`` is left alone. Every quantifier is bounded, so the cost of one
+#: search is fixed whatever the text holds.
+_CREDENTIAL_LABEL_BEFORE_RE = re.compile(
+    r"(?i:secret|passw(?:or)?d|token|credential|api[-_ ]?key|auth|private[-_ ]?key"
+    r"|access[-_ ]?key|client[-_ ]?key|signing[-_ ]?key)"
+    r"[A-Za-z0-9_.-]{0,24}(?=[\s\"'`]{0,12}[:=])[\s\"'`:=]{1,16}\Z"
+)
+#: How far back the label may start. The label and its separator fit well inside it.
+_CREDENTIAL_LABEL_REACH = 64
 
 # Shannon-entropy floor (bits/char). A uniformly-random 40-char base64 string
 # averages ~4.78 bits/char and empirically almost never drops below ~4.4;
@@ -2135,6 +2149,8 @@ def _credential_redaction_plan(
     A later pass's span never rewrites text an earlier pass already claimed; it
     redacts only the part of its span still standing in plaintext, so no
     character is redacted twice and no character a pass flagged is left behind.
+
+    Inside a ``redaction_switch.code_text()`` scope pass 3 alone stands down.
     """
     if credential_pass_bypassed():
         return [], [], {}
@@ -2214,10 +2230,24 @@ def _credential_redaction_plan(
     #
     # Only windows sharing >= _HOST_ID_EXEMPT_OVERLAP bytes with this host's id are exempt;
     # whole-run context preserves every other base verdict, including smaller overlaps.
+    #
+    # A `redaction_switch.code_text()` scope judges only a run that follows a credential
+    # label: the unlabelled guess is what rewrites an alphabet the program indexes into.
+    bare_runs = (
+        b64_matches
+        if bare_secret_pass_enabled()
+        else [
+            m
+            for m in b64_matches
+            if _CREDENTIAL_LABEL_BEFORE_RE.search(
+                text[max(0, m.start() - _CREDENTIAL_LABEL_REACH) : m.start()]
+            )
+        ]
+    )
     withheld = _darwin_user_dir_ids(text)
     pass3: list[_RedactionSpan] = []
     link_spans: list[tuple[int, int]] | None = None
-    for m in b64_matches:
+    for m in bare_runs:
         run_end = m.start() + len(m.group().rstrip("="))
         run = text[m.start() : run_end]
         pieces = _uncovered(m.start(), run_end, withheld)
