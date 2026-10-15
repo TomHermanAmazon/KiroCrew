@@ -47,7 +47,13 @@ scoped `raw` transport with the multipart body untouched, so the token's own
 manifest check still applies server-side. The upload body itself (image
 downscaling, multipart parts, the `paths` contract) is the one
 `utils/composerUpload.ts` the dashboard client also uses; only the transport
-differs. A pasted or dropped file on an
+differs. Upload, staging and the send-recovery primitives (`clear`, `restore`,
+`removeFile`) live in chat-core's store-free
+`chat-core/composer/useComposerAttachments.ts`, which takes the grant, the
+POST and the refusal text from its host; `app-sdk/useEmbedAttachments.ts` is
+only the app adapter that supplies the declared-path grant and the scoped
+`raw` POST. The import-graph test in `ChatEmbed.composerStoreFree.test.tsx`
+pins the shared hook as store-free. A pasted or dropped file on an
 ungranted host is refused in the composer with a visible notice; a drop with
 files is always default-prevented so the browser never navigates to the file.
 The send reuses chat-core's `buildOutgoingTurn`, so the wire text and

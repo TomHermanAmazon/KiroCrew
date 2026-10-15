@@ -82,7 +82,17 @@ describe('ChatEmbed composer is store-free (static)', () => {
     expect(src).not.toMatch(/<textarea[\s/]/)
   })
 
-  it.each(['Composer.tsx', 'atoms.tsx'])('nothing chat-core/composer/%s imports reaches the Redux store', (entry) => {
+  it('the embed stages attachments through the chat-core Attach hook, not its own', () => {
+    const src = readFileSync(join(SRC, 'app-sdk', 'useEmbedAttachments.ts'), 'utf8')
+    expect(src).toMatch(/from '\.\.\/chat-core\/composer\/useComposerAttachments'/)
+    expect(src).toMatch(/useComposerAttachments\(/)
+    // The adapter holds no staging state of its own: upload, staging and
+    // send-time recovery are the shared hook's.
+    expect(src).not.toMatch(/\buseState\b/)
+    expect(src).not.toMatch(/\buploadComposerFiles\b/)
+  })
+
+  it.each(['Composer.tsx', 'atoms.tsx', 'useComposerAttachments.ts'])('nothing chat-core/composer/%s imports reaches the Redux store', (entry) => {
     const g = importGraph(join(SRC, 'chat-core', 'composer', entry))
     const storeFiles = g.files.filter(f => relative(SRC, f).startsWith('store/') || relative(SRC, f) === 'store.ts')
     expect(storeFiles.map(g.chain)).toEqual([])
