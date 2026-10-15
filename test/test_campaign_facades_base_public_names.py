@@ -385,6 +385,14 @@ _BASE_PUBLIC_NAMES: dict[str, frozenset[str]] = {
         voice_runtime_workspace_conflict warm_backend wrap_argv wrap_argv_async
         wrapped_by_crew_sandbox
         """.split()),
+    "kiro_crew.history_consolidation": frozenset("""
+        AUTO_SKILL_MAX_PROCEDURE_CHARS AttemptedSpan AutoSkillProvenance ClaimRefusal
+        DISPLAY_ONLY_ROLES HistoryConsolidator LESSON_APPLIES_INSTRUCTION
+        LESSON_APPLIES_ON_TOPIC SKILL_UPDATE ToolApprovalPolicy VERDICT_DUP VERDICT_NEW
+        VERDICT_UPDATE authored_lesson_applies background_turn extracted_lesson_applies
+        frontmatter_value live redact_credentials redact_exfiltration_urls run_in_embed_pool
+        scope_is_admissible strip_image_refs validate_skill_script
+        """.split()),
 }
 
 #: Facade -> ``{name: module holding it}`` for each base name the facade re-binds by import.
@@ -584,6 +592,31 @@ _REBOUND: dict[str, dict[str, str]] = {
         "sandbox_mount_sweep": "kiro_crew",
         "sandbox_plan": "kiro_crew",
         "sandbox_seatbelt": "kiro_crew",
+    },
+    "kiro_crew.history_consolidation": {
+        "AUTO_SKILL_MAX_PROCEDURE_CHARS": "kiro_crew.skills",
+        "AttemptedSpan": "kiro_crew.history_consolidation_span",
+        "AutoSkillProvenance": "kiro_crew.skills",
+        "ClaimRefusal": "kiro_crew.skills",
+        "DISPLAY_ONLY_ROLES": "kiro_crew.history_projection",
+        "LESSON_APPLIES_INSTRUCTION": "kiro_crew.lesson_validation",
+        "LESSON_APPLIES_ON_TOPIC": "kiro_crew.lesson_validation",
+        "SKILL_UPDATE": "kiro_crew.frontmatter",
+        "ToolApprovalPolicy": "kiro_crew.llm_helpers",
+        "VERDICT_DUP": "kiro_crew.skills_dedupe",
+        "VERDICT_NEW": "kiro_crew.skills_dedupe",
+        "VERDICT_UPDATE": "kiro_crew.skills_dedupe",
+        "authored_lesson_applies": "kiro_crew.lesson_validation",
+        "background_turn": "kiro_crew.llm_helpers",
+        "extracted_lesson_applies": "kiro_crew.lesson_validation",
+        "frontmatter_value": "kiro_crew.frontmatter",
+        "live": "kiro_crew.config",
+        "redact_credentials": "kiro_crew.security",
+        "redact_exfiltration_urls": "kiro_crew.security",
+        "run_in_embed_pool": "kiro_crew.executors",
+        "scope_is_admissible": "kiro_crew.project_scope",
+        "strip_image_refs": "kiro_crew.image_refs",
+        "validate_skill_script": "kiro_crew.skills_script_validator",
     },
 }
 
