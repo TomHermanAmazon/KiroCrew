@@ -179,7 +179,6 @@
 2594 src/kiro_crew/subagent_persistence.py
 2192 src/kiro_crew/taskq/adapters/runner.py
 2167 src/kiro_crew/taskq/store.py
-3329 src/kiro_crew/taskrunner.py
 2195 src/kiro_crew/telegram/client.py
 2730 src/kiro_crew/telegram/renderer.py
 2490 src/kiro_crew/telegram/transport_dispatch.py

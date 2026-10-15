@@ -385,6 +385,21 @@ _BASE_PUBLIC_NAMES: dict[str, frozenset[str]] = {
         voice_runtime_workspace_conflict warm_backend wrap_argv wrap_argv_async
         wrapped_by_crew_sandbox
         """.split()),
+    "kiro_crew.taskrunner": frozenset("""
+        BACKGROUND_KEY DEFAULT_TOKEN_BUDGET ExecutionContext KiroCrewConfig Lesson
+        MAX_RECOVERIES MAX_REPLAN MAX_RETRIES MAX_TOTAL_TASKS NotifyCallback PROGRESS_FILE
+        Project SESSION_PREFIX STALL_CANCEL_TIMEOUT STALL_TIMEOUT StartPriority Step StepStatus
+        Task TaskRun TaskRunner TaskSnapshotError TaskStatus WorkflowInitializing
+        WorkflowRunPublisher WorkingMemory atomic_write auto_name bind_session_execution
+        build_resume_context build_status build_task_prompt capture_admission_execution
+        capture_execution capture_session_execution compute_memory_sized_parallel_cap decompose
+        decompose_yaml execute_single_task execution_from_record format_completion_summary
+        git_coord group_parallel_tasks is_sensitive_path lesson_extraction_enabled live
+        load_checkpoint logger normalize_cross_group_deps notify parse_tasks plan_to_yaml
+        redact_credentials redact_exfiltration_urls run_in_embed_pool
+        safe_read_file_bytes_nolink safety_override save_progress sel self_review_fn
+        shutdown_event stream_and_collect_json update_plan_tasks validate_file_path
+        """.split()),
 }
 
 #: Facade -> ``{name: module holding it}`` for each base name the facade re-binds by import.
@@ -584,6 +599,10 @@ _REBOUND: dict[str, dict[str, str]] = {
         "sandbox_mount_sweep": "kiro_crew",
         "sandbox_plan": "kiro_crew",
         "sandbox_seatbelt": "kiro_crew",
+    },
+    "kiro_crew.taskrunner": {
+        "WorkflowInitializing": "kiro_crew.taskrunner_parts.workflow_port",
+        "WorkflowRunPublisher": "kiro_crew.taskrunner_parts.workflow_port",
     },
 }
 

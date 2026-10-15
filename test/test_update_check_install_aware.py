@@ -1841,7 +1841,7 @@ async def callback(job):
                 ("len(self._running_script_ids)",),
             ),
             "taskrunner": (
-                [root / "taskrunner.py"],
+                [root / "taskrunner.py", *sorted((root / "taskrunner_parts").glob("*.py"))],
                 3,
                 ("runner.running",),
             ),
