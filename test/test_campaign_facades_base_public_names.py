@@ -411,6 +411,21 @@ _BASE_PUBLIC_NAMES: dict[str, frozenset[str]] = {
         resume_takes_tool_search_replay sandbox_init_failure_for_runtime sanitize_sink_text
         servers_exposing_no_tools telemetry_channel_of workspace_cli_settings_lock
         """.split()),
+    "kiro_crew.vector_memory": frozenset("""
+        ALLOWED_LESSON_CATEGORIES EPISODIC_BLOCK_TEXT_CHARS EpisodicWriteOutcome
+        LESSON_APPLIES_ON_TOPIC LESSON_APPLIES_UNSTATED LESSON_APPLIES_VALUES
+        LessonWriteOutcome LessonWriteResult MAX_MEMORY_SEARCH_QUERY MEMORY_DB_FILE
+        PRIORITY_BULK PRIORITY_INTERACTIVE PRIORITY_NORMAL SemanticRejectCode
+        VectorMemoryStore authored_lesson_applies bulk_pace_delay canonical_scope
+        config_dir consolidation_source_digest contains_volatile_lesson_fact
+        create_member_database declared_store extracted_lesson_applies live logger
+        memory_schema memory_stores memory_v2 normalize_lesson_applies
+        normalize_lesson_category open_member_database order_by_request_relevance
+        owner_only_opener platform_compat prepare_owner_only_sqlite
+        project_scope_satisfied read_member_database_identity record_meta
+        redact_and_truncate render_lesson_tier render_withheld_tier scope_is_admissible
+        scope_selector_is_inadmissible sqlite3 tighter_lesson_budget timed
+        """.split()),
 }
 
 #: Facade -> ``{name: module holding it}`` for each base name the facade re-binds by import.
@@ -693,6 +708,17 @@ _REBOUND: dict[str, dict[str, str]] = {
         "servers_exposing_no_tools": "kiro_crew.acp.mcp_session_report",
         "telemetry_channel_of": "kiro_crew.messaging.link",
         "workspace_cli_settings_lock": "kiro_crew.workspace_cli_settings",
+    },
+    "kiro_crew.vector_memory": {
+        "EpisodicWriteOutcome": "kiro_crew.vector_memory_runtime.write_outcomes",
+        "LessonWriteOutcome": "kiro_crew.vector_memory_runtime.write_outcomes",
+        "LessonWriteResult": "kiro_crew.vector_memory_runtime.write_outcomes",
+        "SemanticRejectCode": "kiro_crew.vector_memory_runtime.write_outcomes",
+        "consolidation_source_digest": "kiro_crew.vector_memory_member",
+        "create_member_database": "kiro_crew.vector_memory_member",
+        "declared_store": "kiro_crew.vector_memory_member",
+        "open_member_database": "kiro_crew.vector_memory_member",
+        "read_member_database_identity": "kiro_crew.vector_memory_member",
     },
 }
 
