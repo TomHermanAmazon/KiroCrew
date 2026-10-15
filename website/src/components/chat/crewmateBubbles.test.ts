@@ -10,6 +10,8 @@ import {
   isCrewmateSpeech,
   opensCrewmateRun,
   crewmateRowClass,
+  withQueuedAsBubbles,
+  awaitingCrewmateReply,
 } from './crewmateBubbles'
 
 const at = (iso: string) => iso
@@ -56,36 +58,12 @@ describe('filterCrewmateChat', () => {
     for (const m of rows) expect(isCrewmateChatRow(m)).toBe(true)
   })
 
-  it('hides only the machinery notice kinds (empty_turn, arm_refusal); every other notice draws', () => {
-    // A crewmate's chat drops a `notice` by an ALLOWLIST of machinery kinds,
-    // never by role: the empty-turn recovery card and the automation arm
-    // refusal are the runtime talking about itself and are hidden, while a
-    // notice the person must act on (a dropped queued message, a model-fallback
-    // hint) has no second route and still draws. Fails if the filter goes back
-    // to a blanket role drop OR to the old empty_turn-only tag.
-    const emptyTurn: ChatMessage = {
-      role: 'notice', cls: 'msg msg-info', ts: at('2026-09-22T06:00:05Z'),
-      content: 'ℹ️ The turn ended without a closing reply — continuing once from what already ran.',
-      meta: { kind: 'empty_turn' },
-    }
-    const armRefusal: ChatMessage = {
-      role: 'notice', cls: 'msg msg-info', ts: at('2026-09-22T06:00:06Z'),
-      content: '⚠️ Automation loop NOT updated — it kept its previous instruction: a stopped loop cannot be restarted.',
-      meta: { kind: 'arm_refusal' },
-    }
-    const modelFallback: ChatMessage = {
-      role: 'notice', cls: 'msg msg-info', ts: at('2026-09-22T06:00:07Z'),
-      content: "That model isn't offered right now. Pick another model from the composer.",
-      meta: { kind: 'model_fallback' },
-    }
-    const untaggedNotice: ChatMessage = { role: 'notice', content: 'note', cls: '', ts: at('2026-09-22T06:00:08Z') }
-    expect(isCrewmateChatRow(emptyTurn)).toBe(false)
-    expect(isCrewmateChatRow(armRefusal)).toBe(false)
-    // Person-actionable notices keep drawing — no second route for them.
-    expect(isCrewmateChatRow(modelFallback)).toBe(true)
-    expect(isCrewmateChatRow(untaggedNotice)).toBe(true)
-    expect(filterCrewmateChat([emptyTurn, armRefusal, modelFallback, untaggedNotice]))
-      .toEqual([modelFallback, untaggedNotice])
+  it('hides runtime notices regardless of kind without mutating the audit history', () => {
+    const notices: ChatMessage[] = ['empty_turn', 'arm_refusal', 'model_fallback', undefined].map(kind => ({
+      role: 'notice', content: 'runtime detail', cls: '', meta: kind ? { kind } : undefined,
+    }))
+    expect(filterCrewmateChat(notices)).toEqual([])
+    expect(notices).toHaveLength(4)
   })
 
   it('an all-machinery transcript filters to nothing (so the empty hint can show)', () => {
@@ -364,3 +342,68 @@ describe('crewmateRowClass', () => {
   })
 })
 
+
+describe('withQueuedAsBubbles', () => {
+  const queuedRow = (id: string, content: string, sendId?: string): ChatMessage =>
+    ({ role: 'queued', content, cls: 'msg msg-queued', ts: '2026-10-14T08:00:02Z', meta: { queueId: id, ...(sendId ? { sendId } : {}) } })
+
+  it('draws a queued message where it was sent, so a later reply sits below it', () => {
+    const q = queuedRow('q1', 'second')
+    const out = withQueuedAsBubbles([user('2026-10-14T08:00:00Z', 'first'), q, said('2026-10-14T08:00:03Z', 'reply to first')], [q])
+    expect(out.map(m => [m.role, m.content])).toEqual([['user', 'first'], ['user', 'second'], ['assistant', 'reply to first']])
+    expect(out[1].meta?.queuedBubble).toBe(true)
+  })
+
+  it('drops queued rows the chat does not draw and the requeued twin of a shown send', () => {
+    const shown: ChatMessage = { ...user('2026-10-14T08:00:00Z', 'asked'), meta: { sendId: 's1' } }
+    const twin = queuedRow('q1', 'asked', 's1')
+    const hidden = queuedRow('q2', 'system delivery')
+    expect(withQueuedAsBubbles([shown, twin, hidden], [twin]).map(m => m.content)).toEqual(['asked'])
+  })
+
+  it('draws no bubble for an injected entry: a cron notification or an app message', () => {
+    const cron: ChatMessage = { role: 'queued', content: '[Cron notification from "nightly"]\nSweep.\n[End of cron notification]', cls: 'msg msg-queued', meta: { cronLabel: 'nightly', queue_id: 'q1' } }
+    const hydrated: ChatMessage = { role: 'queued', content: '[Cron notification from "nightly"]\nSweep.', cls: 'msg msg-queued', meta: { queueId: 'q2', kind: 'cron_notification' } }
+    const app: ChatMessage = { role: 'queued', content: 'clicked', cls: 'msg msg-queued', meta: { queueId: 'q3', kind: 'mcp_app_message', appLabel: 'demo' } }
+    const mine = queuedRow('q4', 'my own message', 's4')
+    const all = [user('2026-10-14T08:00:00Z', 'first'), cron, hydrated, app, mine]
+    expect(withQueuedAsBubbles(all, [cron, hydrated, app, mine]).map(m => [m.role, m.content])).toEqual([
+      ['user', 'first'],
+      ['user', 'my own message'],
+    ])
+  })
+
+  it('hands the same array back when nothing is queued', () => {
+    const all = [user('2026-10-14T08:00:00Z')]
+    expect(withQueuedAsBubbles(all, [])).toBe(all)
+  })
+})
+
+describe('awaitingCrewmateReply', () => {
+  const sent = (meta: Record<string, unknown> = {}): ChatMessage => ({ ...user('2026-10-14T08:00:00Z', 'ping'), meta: { sendId: 's1', ...meta } })
+
+  it('waits from the send until the crewmate answers', () => {
+    expect(awaitingCrewmateReply([sent({ optimistic: true })], 's1')).toBe(true)
+    expect(awaitingCrewmateReply([sent(), tool('2026-10-14T08:00:01Z')], 's1')).toBe(true)
+    expect(awaitingCrewmateReply([sent(), said('2026-10-14T08:00:02Z')], 's1')).toBe(false)
+  })
+
+  it('waits while the send is parked in the queue, behind an earlier reply', () => {
+    const q: ChatMessage = { role: 'queued', content: 'ping', cls: '', meta: { queueId: 'q1', sendId: 's1' } }
+    expect(awaitingCrewmateReply([said('2026-10-14T07:59:00Z'), q], 's1')).toBe(true)
+  })
+
+  it('a quiet end, an error, a stop card or a pending approval ends the wait', () => {
+    const quiet: ChatMessage = { role: 'assistant', content: '\u200B', cls: '' }
+    const error: ChatMessage = { role: 'error', content: 'failed', cls: '' }
+    const stop: ChatMessage = { role: 'system', content: '', cls: '', kind: 'stop_event', meta: { kind: 'stop_event' } }
+    const ask: ChatMessage = { role: 'permission', content: 'allow?', cls: '', meta: { approval_id: 'a1' } }
+    for (const row of [quiet, error, stop, ask]) expect(awaitingCrewmateReply([sent(), row], 's1')).toBe(false)
+  })
+
+  it('waits on nothing for a dropped send, a send in doubt or no send', () => {
+    expect(awaitingCrewmateReply([said('2026-10-14T08:00:02Z')], 's1')).toBe(false)
+    expect(awaitingCrewmateReply([sent({ optimistic: true, deliveryUnconfirmed: true })], 's1')).toBe(false)
+    expect(awaitingCrewmateReply([sent()], undefined)).toBe(false)
+  })
+})

@@ -3257,6 +3257,155 @@ WeCom always steers regardless of `queue_mode`: its replies are bound to the
 inbound request, so a queued-then-drained reply can't be delivered later (see
 [messaging](messaging.md)).
 
+### Responsive human sends in a crewmate DM
+
+`POST /api/chat?ws=1` accepts optional JSON `responsive: true`. Only the
+middleware-authenticated dashboard owner on an existing local member DM earns
+priority: the configured member, protected DM binding, member identity and store
+must agree, and an app-owned, linked, closing or replaced slot is ineligible.
+Other callers keep the ordinary send/steer/queue behavior; a body flag grants no
+cancellation authority. Ordinary Sessions defaults do not change.
+
+`dashboard/responsive_chat.py` first tries a steer into a running turn (below);
+otherwise it accepts the message into the existing slot queue
+before attempting cancellation. The entry keeps only normalized sendId, validated
+attachments and quote, and the server's admission snapshot; arbitrary caller
+metadata cannot mint queue plumbing or delivery stamps. Acceptance invokes the
+existing human-input nudge notification and edition message observer exactly once,
+without repeating them at drain. The receipt names the queue id; a transcript mid
+exists only once the drain writes the row. Priority is a process-local
+entry field, outside persisted row metadata and the durable queue codec. A
+restart retains the ordinary queued message but restores no priority authority.
+The usual queue containment revalidation still runs before dispatch.
+Queue push/pop frames and slot-detail queue entries carry normalized `meta.sendId`
+when present, together with attachments and quote. The browser replaces only the
+optimistic row with that exact ID, including on rehydration, and turns it into a
+user row only on a drain. Queue custody confirms acceptance, not execution: a
+late, failed or contradictory HTTP receipt cannot restore another copy after
+that custody is proven, and the accepted queue card stays cancellable. Legacy
+entries without an ID keep their existing path; text never correlates an
+ID-bearing optimistic send.
+
+An idle parent drains the selected human entry despite attached background work.
+
+**Steer first.** When a running parent can take a steer -- a live turn owner,
+`supports_steer` on the published client, the captured session still routed, no
+Stop, pending approval/question/native permission, compaction or claimed cancel
+(a protected answering turn takes the steer but is never cancelled)
+-- the send goes through the existing `steer_into_running_turn`
+as the session's own human, with the reply-first guidance prefix, a minted
+`steer_delivery_id`, the containment snapshot and the sendId/attachments. The
+HTTP receipt returns at once: `{"ok": true, "steered": true, "responsive":
+"steered"}`, or the teardown's `queued` answer when the turn ended during the
+RPC. A steer the backend refuses falls through to the queue path below, unchanged.
+A steered send arms one background grace timer (`STEER_GRACE_SECONDS`, 3.0 s)
+for that turn; sends during it steer as well and join the same timer. The timer
+proves consumption from the existing signal only: the `steering_consumed` settle
+removes the raw text from `_pending_steers`. The other removers (teardown
+requeue, RPC unwind, hard stop) end or replace the owner, which the cancel
+rechecks. When the timer fires and any joined steer is still registered, it
+claims the turn's single cancel and runs the same exact-owner
+`cancel_owned_turn` below, with every recheck. A consumed steer, a changed owner,
+session or Stop generation, or a claimed cancel ends it with no cancel. The
+unconsumed steer stays registered, so the cancelled turn's teardown requeues it
+once through `_requeue_unconsumed_steers` as protected priority on its existing
+row; a turn that ends during the grace requeues it the same way. The turn-end
+tail, the next turn's start and `begin_close` drop a timer still waiting. A
+timer whose grace ended without a cancel lets a later send in the same turn arm
+a fresh one; once the cancel is claimed, later sends queue as today.
+
+The grace belongs to a steer. A send that cannot steer -- a harness whose client
+does not advertise `supports_steer` (and any client before its handshake), or a
+steer the backend refused -- has nothing for the running turn to consume, so it
+is queued and claims the cancel at once, with no grace.
+
+Otherwise, a running parent gets at most one bounded `cancel_owned_turn` attempt against the
+exact Python turn owner and effective session captured by that turn. The
+coordinator rechecks slot incarnation, routing, Stop generation, native activity,
+pending interactions and compaction immediately before calling it. It never calls
+`stop_turn`, `/interrupt`, reset, OS kill or child cancellation, and never claims
+that tools stopped. The queue drains only through the existing runner's handoff;
+a cancel error, unavailable handle or timeout leaves the accepted message queued.
+Only a `None` result proves no cancel was sent: restore that same owner's prior
+interruption/recovery state without overwriting a successor. An attempted cancel's
+`timeout`, `error` or `no_turn` remains uncertain and retains recovery, matching
+the session manager's cancelled-turn replay contract.
+The initial turn admitted from idle is intentionally interruptible if it becomes
+heavy work. An answering turn admitted behind a running or reserved turn is
+protected from automatic cancellation: a burst queues rather than restarting
+that priority answer repeatedly. The sends that waited drain together as one turn
+(`responsive_chat.dequeue_waiting_run`, independent of
+`dashboard.merge_queued_messages`), still one row and one sendId per message: the
+drain reuses each row written at send and anchors the turn on the last. A send
+carrying attachments, a possibly-delivered steer or a send with no written row
+ends the run and drains alone.
+Explicit Stop retains its separate contract. A retained priority cannot drain
+while Stop is pending. Once the matching stop settles, its resolver wakes an idle
+queue under the slot lock and admission reservation, rechecking the slot, session,
+stop generation and interaction fences. If settlement races the ending owner's
+final done-payload read, that owner performs the handoff before releasing the floor.
+
+At an interrupted owner's end-of-turn usage check, a still-queued responsive
+human entry defers Crew's proactive compaction until the protected answering turn
+ends. Usage accounting still runs. The coordinator permits deferral only when its
+ordinary compaction-due predicate passes and confirmed usage is below the existing
+critical ceiling (`_POST_COMPACT_RESET_PCT`); critical or unknown readings, pending
+verdict settlement, recycling, and already-started compactions retain their ordinary
+paths. This is a turn-local request, not a changed threshold or a persistent flag.
+The answering turn performs the normal check even if more human entries are queued.
+Native harness compaction and hard context limits remain untouched: the previous
+usage reading does not prove that a new prompt or attachment fits, so a harness
+may still compact before answering. No tool-dispatch gate guarantees reply order.
+
+Every responsive turn receives gateway-owned, prompt-only principles: start with
+a brief text reply before any tool call (a short acknowledgement when the answer
+needs work), then delegate
+substantial remaining work within existing permissions, answer a burst of messages
+with one reply that adds only what is new (the reference marks the interrupted
+turn's assistant rows as already shown), and inspect the existing
+operation before continuing anything with an unknown result. A bounded,
+redacted transcript reference restores the interrupted opener and observed
+output, with each tool step marked `finished` (its output attached) or `unfinished`.
+Kiro-cli stops a running tool when the turn is cancelled and records it as
+interrupted; no late result arrives. The principles frame the pause as the gateway's
+own scheduling rather than the person's act, let a read-only step run again and ask
+for a changing step's state to be checked first; output remains evidence, not a new
+instruction. This model-context
+output is registered in the security-posture redaction sink inventory. The reference is held
+until a turn lands, never copied into persisted human text or replayed as a new
+user request. Delegation is agent guidance, not a guarantee that a model will
+delegate or that an orphaned tool's eventual output can be recovered.
+
+The same owner/member gate applies the principles to an explicit human steer,
+including a steer whose body carries no `responsive` field. The existing steer
+RPC carries one fixed prefix plus the raw message; pending identity, display,
+transcript and mirrors carry only the raw message. A bounded process-local
+raw-to-wire map makes consumption echoes match the actual sent text. An
+unconsumed steer requeues with the same guidance, sendId, attachments and admission
+snapshot, and reuses its already-written row when that exact row remains live.
+No classifier, model selection or fork is added to choose between these paths.
+The same-request `/prompts get` expansion forwards responsive guidance into its
+nested runner without restarting the outer owner/protection lifecycle. Only the
+provider sees the expanded request and gateway guidance; the transcript keeps
+the person's original command.
+
+**Question answers.** A native question on a live turn keeps its existing steer
+answer route, behind the plain crewmate UI, with the same gateway reply-first
+guidance. An idle native/stateless card blocks no future, so its answer may start
+a responsive turn and the user-row append retires that exact stateless record.
+Blocking MCP asks keep their separate answer endpoint and live future; native
+permissions and other approval futures remain unchanged.
+
+**Limits.** A running turn awaiting approval or a question stays running, with
+its interaction actionable and an ordinary human follow-up queued; automatic
+priority cannot invalidate that wait. A truly blocking idle interaction also
+holds the queue until its existing resolution/drain path can run it.
+A compaction owning the runtime is not cancelled; an idle parent may admit its
+next turn to wait on the normal session permit. Unknown cancel capability degrades
+to the queue. Cancellation can leave an original shell or external side effect
+running: there is no automatic replay, rollback, operation transfer or completion
+claim. Background worker results retain their existing delivery ownership.
+
 ### Queued prompt durability
 
 A prompt admitted while the slot is busy is answered `{"ok": true, "queued":

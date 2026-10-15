@@ -42,6 +42,19 @@ async def api_chat_slot_queue_cancel(request: web.Request) -> web.Response:
     # the composer, so a redacted copy of the user's own words would replace the
     # link they typed with a placeholder.
     _entry = next((i for i in slot._queue if i["id"] == queue_id), None)
+    from kiro_crew.dashboard import responsive_chat
+
+    if _entry is not None and responsive_chat.row_already_written(slot, _entry):
+        # Its user row is already in the transcript: removing only the queue
+        # entry would leave the message there and hand the text back to the
+        # composer, where sending it again writes a second copy.
+        return web.json_response(
+            {
+                "error": "this message is already in the conversation and can no longer be cancelled",
+                "code": "queue_item_already_sent",
+            },
+            status=409,
+        )
     _user_origin = queue_entry_is_user_origin(_entry)
     content = slot.queue_remove_by_id(queue_id)
     if content is None:
@@ -102,6 +115,17 @@ async def api_chat_slot_queue_edit(request: web.Request) -> web.Response:
     content = body.get("content")
     if not isinstance(content, str) or not content.strip():
         return web.json_response({"error": "content must be a non-empty string"}, status=400)
+    queued = next((i for i in slot._queue if i.get("id") == queue_id), None)
+    from kiro_crew.dashboard import responsive_chat
+
+    if queued is not None and responsive_chat.row_already_written(slot, queued):
+        return web.json_response(
+            {
+                "error": "this message is already in the conversation and can no longer be edited",
+                "code": "queue_item_already_sent",
+            },
+            status=409,
+        )
     if not slot.queue_edit_by_id(
         queue_id,
         content,

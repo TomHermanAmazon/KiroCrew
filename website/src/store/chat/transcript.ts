@@ -155,6 +155,19 @@ export function reconcileOptimisticEcho(
   const reconcileFloor = Math.max(0, msgs.length - RECONCILE_WINDOW)
   for (let i = msgs.length - 1; i >= reconcileFloor; i--) {
     const m = msgs[i]
+    if (m.role === 'queued' && m.meta?.responsiveSend && m.meta?.sendId === echoSendId) {
+      // A crewmate send that waits behind a running turn has its row written
+      // at send time (responsive_chat.write_row_at_send), after its queue entry
+      // already took the bubble's place. The row takes that same place and key,
+      // so the message neither moves nor is re-keyed; its queue entry, still
+      // listed until the drain, draws nothing beside it (withQueuedAsBubbles).
+      const { optimistic: _o, deliveryUnconfirmed: _d, responsiveSend: _r, queueId: _q, ...kept } = m.meta
+      msgs[i] = {
+        role: 'user', content: m.content, cls: 'msg msg-u', ts: ts ?? m.ts,
+        meta: { ...kept, ...meta, clientTs: (m.meta.clientTs as string | undefined) || m.ts },
+      }
+      return true
+    }
     if (m.role !== 'user') continue
     if (m.meta?.sendId === echoSendId) {
       // Keep the rendered row's identity when the server supplies its timestamp.

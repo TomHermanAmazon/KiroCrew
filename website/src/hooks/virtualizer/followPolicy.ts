@@ -43,7 +43,7 @@ import {
   scrollIntentPending,
   type ScrollGeom,
 } from './FollowController'
-import { computeJumpWindow, getOffset as getOffsetFn, tailWindow, type HeightGetter, type WindowRange } from './WindowCalculator'
+import { bottomPinWindow, computeJumpWindow, getOffset as getOffsetFn, tailWindow, type HeightGetter, type WindowRange } from './WindowCalculator'
 import type { ScrollToIndexOptions } from './types'
 import type { ReadingPositionEntry } from './readingPosition'
 import type { ResizeBatch } from './measurement'
@@ -541,6 +541,9 @@ export function usePinning<T>(ctx: {
   reading: Pick<ReadingPositionEntry, 'settleGateRef' | 'restoreOwnsPosition'>
 }): Pinning {
   const { followOutput, overscan, scrollerRef, itemsRef, runActiveRef, getH, setWindowRange } = ctx
+  // Live prices for scrollToBottom without making it depend on `getH`.
+  const getHRef = useRef(getH)
+  getHRef.current = getH
   const {
     stickRef,
     lastWriteTopRef,
@@ -1149,7 +1152,12 @@ export function usePinning<T>(ctx: {
       // reader who had left 24,600px from the end at `to-end 0px`.
       if (restoreOwnsPosition()) return
       // Mount the tail so the bottom items have real heights, then force-pin.
-      setWindowRange(tailWindow(count, overscan))
+      // The tail covers the viewport (bottomPinWindow): a bare overscan-sized
+      // tail unmounted the rows on screen and showed the spacer's placeholder
+      // bars for the frames until the pin's scroll remounted them. Prices are
+      // read through a ref so this callback keeps its identity across a
+      // session or height-scope change (the surface contract).
+      setWindowRange(bottomPinWindow(count, overscan, getHRef.current, el.clientHeight))
       // Arm follow immediately so a streaming chunk that lands between now and
       // the rAF is also followed.
       stickRef.current = followOutput

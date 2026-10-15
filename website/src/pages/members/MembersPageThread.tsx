@@ -993,10 +993,8 @@ export function MembersPageThreadColumn({
                           page's widest region, and an uncapped line length is
                           unreadable on wide screens.
 
-                          Default (split) busy mode: a send while the member is
-                          working offers the same Steer / Queue / Jev auto choice
-                          as the main chat, so the user can queue a follow-up
-                          instead of always interrupting the running turn. */}
+                          The crewmate identity opts this pane into a normal Send
+                          at every runtime state; the gateway owns prioritization. */}
                       <ChatPane
                         slotKey={activeSlot}
                         agentLocked

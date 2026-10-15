@@ -3104,6 +3104,7 @@ class _ChatSlot:
         "_turn_in_flight_generation",
         "_turn_in_flight_prompt",
         "_active_turn_session_key",
+        "_responsive",
         "_side",
         "_acp_client",
         "_last_turn_awaiting_permission",
@@ -4195,6 +4196,8 @@ class _ChatSlot:
         # lifecycle owner (installed once the turn is committed, cleared after
         # its session is released).
         self._active_turn_session_key: str = ""
+        # Process-local human priority; queue/history metadata cannot restore it.
+        self._responsive: Any = None
         # True only when this slot was created to DISPLAY a conversation that
         # already lives in a channel transcript (the reconciler surfacing a
         # thread, a restore, a History resume). It is what separates such a tab
@@ -4504,6 +4507,9 @@ class _ChatSlot:
         if self._synthesis_recheck is not None:
             self._synthesis_recheck.cancel()
             self._synthesis_recheck = None
+        if self._responsive is not None:
+            # A responsive steer's grace timer may not outlive its slot.
+            self._responsive.cancel_grace()
 
     def cancel_close(self) -> None:
         """Release THIS holder's admission fence when teardown leaves the slot live.

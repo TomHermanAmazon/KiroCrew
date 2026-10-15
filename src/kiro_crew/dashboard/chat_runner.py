@@ -4970,6 +4970,18 @@ async def _start_next_queued_turn(
         )
         merge = False
 
+    from kiro_crew.dashboard import responsive_chat
+
+    priority_id = responsive_chat.first_priority_id(slot)
+    if priority_id and (slot._stopping or slot._stop_state != "idle"):
+        return False
+    # Picked here rather than asked for by a card: the person's waiting sends
+    # are one conversation, so a leading run of them drains as one turn.
+    auto_priority = bool(priority_id and not required_queue_id)
+    if priority_id and not required_queue_id:
+        required_queue_id = priority_id
+        allow_user_during_subagents = True
+
     hold_users = bool(
         not allow_user_during_subagents
         and subagents_hold_user_messages(state, effective_session_key(slot))
@@ -4983,6 +4995,8 @@ async def _start_next_queued_turn(
     if hold_users:
         # Sub-agent completions / recovery still flow while user messages wait.
         next_msg, consumed = _dequeue_next_system_message(slot)
+    elif auto_priority and (run := responsive_chat.dequeue_waiting_run(slot)) is not None:
+        next_msg, consumed = run
     else:
         # ``required_queue_id`` is an explicit request to run exactly one card.
         # Promotion selects it; merging here would consume unrelated queued user
@@ -5071,8 +5085,10 @@ async def _start_next_queued_turn(
     # only plain prompts persist (`slot_queue_repository._is_durable_queue_entry`),
     # and the restore drops the actor stamp, so the text is all that is left and
     # it cannot name an event.
-    _not_an_event = _actor_for_queue_items(consumed) == "app" or any(
-        item.get(RESTORED_QUEUE_KEY) for item in consumed
+    _not_an_event = (
+        _actor_for_queue_items(consumed) == "app"
+        or any(item.get(RESTORED_QUEUE_KEY) for item in consumed)
+        or any(responsive_chat.priority_entry(item) for item in consumed)
     )
     is_cron = not _not_an_event and next_msg.startswith(CRON_NOTIFY_PREFIX)
     is_subagent = not _not_an_event and next_msg.startswith(SUBAGENT_COMPLETION_PREFIXES)
@@ -5136,7 +5152,8 @@ async def _start_next_queued_turn(
             or is_subagent
             or is_recovery
             or is_app_message
-            or is_automation_notice,
+            or is_automation_notice
+            or responsive_chat.reusable_row(slot, consumed, next_msg) is not None,
         }
         # The client rebuilds the drained entry as a user row from this frame
         # alone (no `chat_message` echo follows for a user row), so the lists
@@ -5146,6 +5163,11 @@ async def _start_next_queued_turn(
             **attachment_meta(item.get("meta")),
             **quote_meta(item.get("meta"), user_origin=queue_entry_is_user_origin(item)),
         }
+        from kiro_crew.dashboard.chat_delivery import normalize_send_id
+
+        _pop_send_id = normalize_send_id((item.get("meta") or {}).get("sendId"))
+        if _pop_send_id:
+            _pop_meta["sendId"] = _pop_send_id
         if _pop_meta:
             _pop["meta"] = _pop_meta
         state.broadcast_ws("queue_pop", _pop)
@@ -5346,12 +5368,14 @@ async def _start_next_queued_turn(
         # This is a loss-of-provenance marker, never authority recovered from disk.
         # Persist it on the row so auto-titling and refresh rebase both exclude it.
         _drained_meta[RESTORED_TURN_META_KEY] = True
-    current_row = slot.append(
-        row_role,
-        next_msg,
-        row_cls,
-        meta=_drained_meta or None,
-    )
+    current_row = responsive_chat.reusable_row(slot, consumed, next_msg)
+    if current_row is None:
+        current_row = slot.append(
+            row_role,
+            next_msg,
+            row_cls,
+            meta=_drained_meta or None,
+        )
 
     # Per-turn consumption cell for a drained sub-agent completion (see
     # _arm_queued_delivery_settlement): owned by THIS turn, so a successor turn
@@ -5403,6 +5427,11 @@ async def _start_next_queued_turn(
         "_directive_user_origin": directive_user_origin,
         "_directive_channel_origin": directive_channel_origin,
     }
+    if any(responsive_chat.priority_entry(item) for item in consumed):
+        _run_kwargs["_responsive_human"] = True
+        _run_kwargs["_responsive_protected"] = any(
+            item.get("_responsive_protected") is True for item in consumed
+        )
     if _commands_off:
         _run_kwargs["_commands_off"] = True
     # Provenance for the session's log, from the enqueue-time ``kind`` tag — the
@@ -5729,6 +5758,8 @@ async def _finish_queue_cycle(
         return
 
     owner = slot.task
+    stop_pending = slot._stop_state != "idle"
+    stop_session_key = effective_session_key(slot)
     # A held queue keeps what it held when the hold was decided. A send that
     # queues during the read below is the user's next send, the one a hold
     # resumes on, so it gets the floor either way.
@@ -5753,6 +5784,25 @@ async def _finish_queue_cycle(
         # This cycle ran outside ``slot.task`` and a turn took the floor during
         # the read. That turn owns the slot now and ends its own cycle.
         return
+    # A stop resolver cannot drain while this owner still holds the floor.
+    # If it settled during the done read, this is the final handoff opportunity.
+    if (
+        drain
+        and stop_pending
+        and slot._stop_state == "idle"
+        and state._slots.get(slot.key) is slot
+        and effective_session_key(slot) == stop_session_key
+        and not slot.is_closing
+        and not slot._last_turn_auth_required
+    ):
+        from kiro_crew.dashboard import responsive_chat
+
+        if (
+            responsive_chat.first_priority_id(slot)
+            and not responsive_chat.pending_interaction(slot, idle=True)
+            and await _start_next_queued_turn(state, slot)
+        ):
+            return
     slot.append("done", "", "done")
     # Frontend contract: the dashboard treats the first `slots` frame reporting
     # `running: false` as the turn's end (runState settleEndedActiveTurn), so all
@@ -5940,6 +5990,7 @@ class _TurnExit:
         "local_command",
         "outcome",
         "reached_provider",
+        "responsive_owner",
         "turn_id",
     )
 
@@ -5953,6 +6004,7 @@ class _TurnExit:
         self.local_command = ""
         self.outcome: _TurnOutcome | None = None
         self.reached_provider = False
+        self.responsive_owner: Any = None
 
 
 async def _end_turn_tail(
@@ -6059,6 +6111,9 @@ async def _end_turn_tail(
         # is retained, so make sure preparation's completion starts it rather
         # than waiting for the user's next send.
         _arm_parked_queue_drain(state, slot, notice=False)
+    if slot._responsive is not None and slot._responsive.owner is turn_exit.responsive_owner:
+        slot._responsive.owner = None
+        slot._responsive.cancel_grace()
     await _hand_off_queue(
         state,
         slot,
@@ -6365,6 +6420,8 @@ async def _run_chat(
     # (``STEER_POSSIBLY_DELIVERED_META``): the model input, and only it, is led
     # by ``STEER_POSSIBLY_DELIVERED_NOTE``.
     _steer_possibly_delivered: bool = False,
+    _responsive_human: bool = False,
+    _responsive_protected: bool = False,
     _directive_user_origin: bool = False,
     # This turn was drained from a queue entry a PREVIOUS process accepted
     # (`slot_queue_repository.RESTORED_QUEUE_KEY`). Its provenance therefore
@@ -6419,6 +6476,14 @@ async def _run_chat(
     """Stream LLM response into *slot*.  Survives browser disconnect."""
     turn = _ChatTurn(message=message)
     turn_exit.depth = _prompt_depth
+    from kiro_crew.dashboard import responsive_chat
+
+    if _prompt_depth == 0:
+        responsive_chat.begin_turn(slot, protected=_responsive_protected)
+    _responsive_turn = responsive_chat.turn_state(slot)
+    _responsive_owner = asyncio.current_task()
+    turn_exit.responsive_owner = _responsive_owner
+    _responsive_recovery = _responsive_turn.recovery
     # This turn's message is a sub-agent completion verbatim: dispatched as one,
     # or a recovery entry marked as its verbatim requeue. Runner-written text
     # (the synthesis prompt, a continuation, a retry prompt) never is.
@@ -6571,6 +6636,7 @@ async def _run_chat(
             bool(getattr(slot, "_stopping", False))
             or getattr(slot, "_stop_generation", _stop_gen_at_entry) != _stop_gen_at_entry
             or _session_stop_generation() != _session_stop_gen_at_entry
+            or (_responsive_turn.owner is _responsive_owner and _responsive_turn.interrupted)
         )
 
     # Who caused this turn, for the session ledger. Bound COMPLETELY here, before
@@ -7137,8 +7203,13 @@ async def _run_chat(
             _ttft_visible.mark(wire)
             state.broadcast_ws("chat_thinking", {"slot": slot.key, "content": wire})
 
-    def _steer_segment_cut() -> None:
+    def _steer_segment_cut(*, interrupted: bool = True) -> None:
         """Finalize the accumulated text as a segment at a mid-turn steer.
+
+        ``interrupted=False`` is the crewmate send that waits behind this turn
+        (``responsive_chat.accept``): the segment is cut so the person's row
+        lands where they sent it, but the reply goes on, so it is not marked
+        cut off.
 
         Published on the slot (next to ``_acp_client``) so the dashboard steer
         handler can cut the segment right BEFORE it persists the steer user
@@ -7187,7 +7258,7 @@ async def _run_chat(
                 turn.assistant_text,
                 broadcast=False,
                 quiet_persist=True,
-                interrupted=True,
+                interrupted=interrupted,
             )
             # The flushed segment IS visible output. Every other mid-turn site
             # that resets assistant_text (compaction, clear, agent switch,
@@ -7954,6 +8025,8 @@ async def _run_chat(
                     slot,
                     expanded,
                     _prompt_depth=1,
+                    _responsive_human=_responsive_human,
+                    _responsive_protected=_responsive_protected,
                     _directive_user_origin=_directive_user_origin,
                     _directive_self_wake=_directive_self_wake,
                     _directive_channel_origin=_directive_channel_origin,
@@ -9347,6 +9420,10 @@ async def _run_chat(
                 )
 
         _request_prefix_context = ""
+        if not is_slash and (_responsive_human or _responsive_recovery):
+            _request_prefix_context = await asyncio.to_thread(
+                responsive_chat.prompt_context, _responsive_recovery
+            )
 
         # ── $skill expansion: resolve $name tokens anywhere → load skill body ──
         # Operates ONLY on the user's typed message, never on @prompt-substituted
@@ -9518,7 +9595,11 @@ async def _run_chat(
             _session = getattr(state.sessions, "_sessions", {}).get(session_key)
             if _session is not None and getattr(_session, "prev_turn_cancelled", False):
                 _session.prev_turn_cancelled = False
-                if state.context_builder and state.context_builder.conversation_log:
+                if (
+                    not _responsive_recovery
+                    and state.context_builder
+                    and state.context_builder.conversation_log
+                ):
                     from kiro_crew.context import (
                         build_cancelled_turn_preamble,  # circular: context -> dashboard.chat -> chat_runner (can't top-level: context imports chat at module load); circular: context -> chat -> chat_runner; circular: context -> chat
                     )
@@ -16114,7 +16195,17 @@ async def _run_chat(
             and not _is_monitor_wake
         ):
             _maybe_consolidate(state, slot)
-        state.sessions.check_context_usage(session_key, client)
+        # An interrupted owner can otherwise queue /compact ahead of the human
+        # answer on the same permit. The protected answering turn checks again.
+        _defer_compaction = (
+            _responsive_turn.owner is _responsive_owner
+            and _responsive_turn.interrupted
+            and responsive_chat.first_priority_id(slot) is not None
+        )
+        if _defer_compaction:
+            state.sessions.check_context_usage(session_key, client, defer_compaction=True)
+        else:
+            state.sessions.check_context_usage(session_key, client)
         pct = client.context_usage_pct()
         state.broadcast_context_usage(slot.key, _context_usage_payload(slot.key, client))
         if (
@@ -18289,6 +18380,12 @@ async def _run_chat(
             landed=_turn_landed,
         )
         rollback_skill_bodies(state.context_builder, session_key, landed=_turn_landed)
+        if (
+            _turn_landed
+            and not _stop_pressed()
+            and _responsive_turn.recovery is _responsive_recovery
+        ):
+            _responsive_turn.recovery = []
         # Settle the durable FRESH first-turn history debt. The suppression arm of
         # the context branch already paid it directly (a reset asked to forget). The
         # build arm only ASSEMBLED the replay — it reaches, and is durably KEPT by,

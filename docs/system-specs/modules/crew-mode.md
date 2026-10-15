@@ -1834,8 +1834,9 @@ never writes a thread's permission. The profile locks its pickers while the
 thread is opening or refused.
 
 The DM's composer is `CrewComposer`, handed to `ChatPane` as `composerInput`.
-It is the shared `ChatInput` (text, attachments, send / stop / steer, queue)
-without the session toolbar line: no agent, model or effort chip, no context
+It is the shared `ChatInput` (text, attachments, Stop while work runs and the
+composer is empty, and an ordinary Send icon -- never the steer/queue split --
+once the person types), in responsive mode without the session toolbar line: no agent, model or effort chip, no context
 meter, no approval picker, and no prompt optimizer (as in the pop-out crew
 window). With that line gone the toolbar holds only attach, mic and send, so
 the box is ONE row -- a capsule: attach, the text, mic, send on a single line
@@ -2597,10 +2598,12 @@ therefore a turn whose final assistant text is empty: the model's own silence
 is the signal, and no heuristic over the words decides for it — a row with
 visible words is always shown, so a finding or a question can never be
 filtered away. No "N quiet patrols" divider is drawn in their place. Rows the
-user must see or act on stay: `user`, `error`, `notice`, `file`, `mcp_oauth`,
-`permission` (a pending approval is still the approval surface), the stop
-card, and the live `streaming` row. A stop card (a `system` row of kind
-`stop_event`) is drawn too, and like an error row it breaks a run. When the
+user must see or act on stay: `user`, `error`, `file`, `mcp_oauth`,
+`permission` (pending native and background-spawn approvals remain actionable),
+question cards, change cards, the stop card (a `system` row of kind
+`stop_event`, the record of the person's own Stop press, which breaks a run like
+an error row), and the live `streaming` row. Runtime `notice` rows and
+compaction status cards are hidden rather than removed from history. When the
 filter leaves NOTHING to draw although the transcript is not empty (a patroller
 that has never spoken), the pane's empty hint is the crewmate's — "<name> hasn't
 said anything to you yet." plus a verb-first second line pointing at where its visible work is ("See the sessions it is driving."). That second
@@ -2623,7 +2626,7 @@ crewmate's chat (#18346): `ChatPane` turns the pin off when handed a `crewmate`,
 whatever the setting says. The banner exists for long agent runs in the main
 chat, where the question scrolls out of sight while the answer streams; a DM
 with a colleague has short turns, the user's bubble is one row back, the
-crewmate's status line already says what it is doing, and a second floating
+working indicator already reports liveness, and a second floating
 card under the floating glass header read as clutter (owner decision,
 2026-10-09). Ordinary chats and split panes keep it. The roster row
 beside the chat quotes the same thing the chat draws: its `last_message` is
@@ -2720,6 +2723,83 @@ since the header pill reads the same hook it reads "Thinking…" there too: one
 reading, no fork. The chat line shows the tool label in full (`fullText`,
 CSS-truncated, carried as `title`) where the pill clamps it to 40 chars.
 
+While work runs, the conversation keeps the typing bubble and its status line
+above, but draws no subagent progress bars or completion cards. Questions, errors, authentication requests and native/spawn approvals
+remain visible and actionable. The header and task detail surfaces keep their
+existing state sources; this is a conversation-only presentation rule, not a
+change to execution or history. A queued message is drawn as the person's own
+bubble WHERE IT WAS SENT, with no queue card and no interrupt control: the
+order is strictly chronological, iMessage's rule, so a reply (even one to an
+earlier message) that arrives after it draws below it, and it never moves to
+the bottom. `withQueuedAsBubbles` draws the slot's queued rows in place from the
+store order. The person's own send is one stable bubble from Send to drain: a
+queued receipt keeps the optimistic bubble (`ChatPane` does not drop it), the
+`queue_push` replaces that bubble in place -- same index, same `ts`, the
+bubble's ts kept as `meta.clientTs`, marked `responsiveSend` (`appendCorrelatedQueue`)
+-- a refresh that still lists the entry leaves it there (`hydrateQueuedBubbles`),
+and the drain rebuilds the user row at that same index with the same `ts` and
+key (`removeQueuedMessage`), so the row is never removed and redrawn (the
+flash) and never re-keyed. Only these crewmate sends drain in place; any other
+drained entry is its turn's opener and still lands at the end. The transcript
+keeps the same order: a send that waits behind a live turn
+(`responsive_chat.write_row_at_send`) cuts that turn's running text segment
+(not marked interrupted, the reply goes on) and writes the person's user row at
+send time, and the drain reuses that row (`reusable_row`) instead of writing
+one after the whole reply -- so the turn-end reconcile and a reload read the
+order the chat drew live. The send also records the row's durable position, so
+a row the capped live window evicts during a long reply is still reused (it is
+already in the transcript) instead of being written a second time. Its echo takes the queued bubble's place and key
+(`reconcileOptimisticEcho`). No row is written for a send that starts its turn
+at once, or while a stop is settling the slot. While a send's cancel claim is in
+flight its row waits, and so does the row of any send that arrives during it;
+both are written in send order once the claim settles, so a burst never lands
+above the message that preceded it. A queued send whose row is already written
+is part of the conversation, so the queue-edit and queue-cancel routes refuse it
+(409 `queue_item_already_sent`) rather than leave the old row and add a second one
+at the drain, or leave the row and hand the text back to be sent twice. Sessions
+keeps the queue card, whose cancel still works for any send not yet written.
+
+The typing bubble also shows from the moment the person sends, before the
+turn that will answer is running (a queued send, or an interrupt-and-requeue,
+starts that turn seconds later): `awaitingCrewmateReply` holds while the
+pane's newest send still has its row (sent, queued or drained), its delivery
+is not in doubt (`deliveryUnconfirmed`), and nothing after it has answered --
+no assistant row (speech or the say-nothing row of a quiet end), error, stop
+card, pending approval or change card. A refused send's bubble is gone, so it
+waits on nothing. A live turn that ends while the send is not parked in the
+queue ends the wait too (the turn that answers it wrote no row); a turn that
+ends while the send is still queued is the one before it. Until the answering
+turn is live the caption reads the pill's `working` phase, never the slot's
+stale status record from the last turn.
+
+The crewmate `ChatPane` sends `responsive: true` on its normal Send request.
+Submitting a native question's answer while its turn runs additionally carries
+`steer: true`: the existing answer route, not a visible steer control. Idle
+native/stateless answers start a next turn; blocking MCP asks keep their answer
+endpoint and approval futures are untouched. The gateway validates the owner and the real member DM before
+prioritising it; it uses the same session, queue and cooperative cancel contracts,
+not a decision model or a fork. Both that path and a validated explicit human
+steer receive reply-first/delegate-heavy-work principles as prompt context, not
+as displayed or persisted user text. Pending approvals/questions can defer the
+response rather than being silently rejected. An initial idle-admitted work turn
+remains interruptible; a send to a running turn is steered in first and cancels
+that turn only when the steer is still unconsumed after a 3-second grace, so a
+tool call that finishes in time is not thrown away. A harness without steer
+support, or a steer the backend refuses, queues the send and cancels at once:
+the grace waits on a steer, and there is none. The priority answer admitted behind active work is protected
+so a burst never cancels that answer: a later send is steered into it when the
+backend accepts a steer, and otherwise waits. Several sends waiting behind one
+turn drain together as one turn (`responsive_chat.dequeue_waiting_run`), whatever
+`dashboard.merge_queued_messages` says: each keeps the row it was given where it
+was sent, the turn anchors on the last of them, and the run stops at an
+attachment, a possibly-delivered steer or a send with no written row. The prompt
+principles ask for one reply to a burst that adds only what is new. A crewmate chat
+draws a requeued steer's queue entry as no second bubble: its send already has
+its row. Cancellation is
+not proof a tool or external side effect stopped. The full scheduling and recovery contract is in
+[session](session.md#responsive-human-sends-in-a-crewmate-dm). Ordinary Sessions
+and the reply-thread panel's separate reply endpoint retain their behavior.
+
 How it is drawn: the crewmate's messages form **runs**. A message carries NO
 author line — no avatar, no name, no time row — and no avatar gutter: the chat
 is a 1:1 thread with one speaker besides the user, and the DM header's identity
@@ -2732,11 +2812,9 @@ ACCENT (`bg-accent` / `text-accent-fg`, the `tone="accent"` variant of
 `UserMessage`), the iMessage pairing #17839 chose, so colour tells the two
 speakers apart before alignment does. The `user` entry that carries the tone is
 emitted by `createTranscriptRenderers` whenever the host passes `crewmate` (or
-asks to hide the steer badge); the crewmate is its own trigger, because the
-Members page runs the split busy mode (#16684) and a fill gated on the
-steer-only flag alone never reached it (#18361). The Steered chip is the host's
-call (`hideSteerBadge` passed through), so a steer in a crewmate chat still
-wears it. `--bg-hover` is the gray because
+asks to hide the steer badge). The crewmate surface hides the Steered chip
+and ordinary interruption markings; user messages remain plain accent bubbles.
+The transcript retains its delivery metadata for identity and recovery. `--bg-hover` is the gray because
 `--bg-elevated` and `--card` equal the page background in kiro-light,
 highcontrast-light and everforest-light (the bubble would vanish), while
 `--bg-hover` sits above the page in every shipped theme; in forced-colors mode
@@ -2779,9 +2857,8 @@ run's last bubble (`single` / `end`) always carries the footer and its hover
 actions — the SDK's own rule would withhold it when the next drawn row is
 another reply, but in this chat a run only ends on a boundary the user sees,
 so the run end IS the turn end — and the "Steered" chip never draws
-(`suppressSteerAck: true`): in a DM with one named peer every send while it
-works is a steer, so the `[STEERING …]` ack kiro-cli emits would close nearly
-every reply with the mechanics this surface hides (#17838); the marker is still
+(`suppressSteerAck: true`): delivery mechanics stay outside the conversation,
+including a `[STEERING …]` acknowledgement from an explicit steer; the marker is still
 stripped from the prose, and the main chat keeps its chip with the SDK's own
 policy-block rule. The UNFILTERED transcript the pane passes as
 `crewmateTranscript` is read for the run position only. User messages keep
@@ -3043,7 +3120,9 @@ Parent-change and impact previews use the server's redacted projection.
 | `test/test_crew_reasoning_effort.py` | Per-crew effort reaches a crew dispatch |
 | `test/test_members.py`, `test/test_members_dm_thread.py` | Slug validation and containment, activity recording and dedupe, DM-binding canonicality, rules and briefing reads, briefing endpoint |
 | `test/test_chat_send_agent_model_default.py` | The crew model default a new session starts on |
-| `website/src/components/chat/crewmateBubbles.test.ts` | What a crewmate's chat draws (machinery dropped, speech and user-facing rows kept, same array back when nothing is dropped) and the run rule (first/middle/last, single, breaks on a user row and a pending approval but not on a long silence, reads through a resolved approval and an untimestamped streaming row, corners on the left side only) |
+| `website/src/components/chat/crewmateBubbles.test.ts` | What a crewmate's chat draws (machinery dropped, speech and user-facing rows kept, same array back when nothing is dropped) and the run rule (first/middle/last, single, breaks on a user row and a pending approval but not on a long silence, reads through a resolved approval and an untimestamped streaming row, corners on the left side only); a queued message drawn where it was sent, the requeued twin, undrawn queued rows and injected (cron / app) queued rows dropped; when a send is still awaiting a reply |
+| `website/src/test/ChatPane.crewSteerLandsNow.test.tsx` | A crewmate's responsive Send end to end, including one stable bubble through a queued receipt in either order with its push, a later reply drawn below a queued message and the drain keeping order and node, and the typing bubble from Send until a reply, a refusal or the answering turn's silent end |
+| `website/src/store/chat/queue.responsive.test.ts` | Exact queued-send identity, and a crewmate send keeping its index, `ts` and key through push, drain, a missed push and a refresh, while a Sessions send still lands at the end |
 
 ## Retired: Crew Mode
 

@@ -299,6 +299,7 @@ def _make_stop_resolver(
     pending cancel has not produced).
     """
     generation = slot._stop_generation
+    session_key = effective_session_key(slot)
 
     async def _resolve() -> None:
         logger.debug(
@@ -342,6 +343,29 @@ def _make_stop_resolver(
         if card_id is not None and slot._stop_escalated_card_id == card_id:
             slot._stop_escalated_card_id = None
         state.push_slots_update()
+
+        from kiro_crew.dashboard import responsive_chat
+
+        # Teardown can yield the floor while reset is still awaiting completion.
+        # Only the settled stop may wake its retained priority, on that same slot.
+        if responsive_chat.first_priority_id(slot):
+            async with slot._lock:
+                if (
+                    generation == slot._stop_generation
+                    and state._slots.get(slot.key) is slot
+                    and effective_session_key(slot) == session_key
+                    and not slot.running
+                    and not slot._turn_admission_reserved
+                    and not slot.is_closing
+                    and not slot._last_turn_auth_required
+                    and slot._stop_state == "idle"
+                    and not responsive_chat.pending_interaction(slot, idle=True)
+                ):
+                    slot._turn_admission_reserved = True
+                    try:
+                        await _start_next_queued_turn(state, slot)
+                    finally:
+                        slot._turn_admission_reserved = False
 
     return _resolve
 

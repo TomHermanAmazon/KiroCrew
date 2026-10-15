@@ -403,7 +403,8 @@ class TestStopTurnSlotState:
         state = self._make_state(tmp_path, monkeypatch)
         slot = state.get_or_create_slot("s1")
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
-        slot._queue.extend(["msg1", "msg2"])
+        for content in ("msg1", "msg2"):
+            slot.queue_append(content)
 
         async def fake_stop_turn(
             key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None

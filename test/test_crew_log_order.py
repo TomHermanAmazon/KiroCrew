@@ -449,9 +449,15 @@ def test_a_segment_cut_by_a_steer_is_recorded_as_interrupted():
     )
     cut_at = runner_src.index("def _steer_segment_cut(")
     cut_body = runner_src[cut_at : cut_at + 4000]
+    # A steer cut is interrupted unless its caller says the reply goes on
+    # (a crewmate send that waits behind the turn).
+    signature = cut_body[: cut_body.index(")") + 1]
+    assert "interrupted: bool = True" in signature, "a steer cut does not default to interrupted"
     call_at = cut_body.index("_flush_segment(")
     call = cut_body[call_at : call_at + 300]
-    assert "interrupted=True" in call, "the pre-steer flush does not mark its text interrupted"
+    assert (
+        "interrupted=interrupted" in call
+    ), "the pre-steer flush does not mark its text interrupted"
 
 
 def test_an_ordinary_segment_is_not_marked_interrupted():

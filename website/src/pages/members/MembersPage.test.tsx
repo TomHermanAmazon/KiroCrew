@@ -1030,8 +1030,8 @@ describe('MembersPage thread', () => {
     // transcript and composer halves itself; its default stays off for
     // split-view panes, which are already narrow).
     expect(pane).toHaveAttribute('data-follow-content-width', '1')
-    // A send while the member is working gets the main chat's Steer / Queue /
-    // Jev auto split, so the Members page must NOT ask for 'steer-only'.
+    // The host passes its crewmate identity; ChatPane owns the responsive
+    // send mode, leaving its default for ordinary session panes unchanged.
     expect(pane).toHaveAttribute('data-busy-mode', 'split')
     // The Crew page draws its own composer (no model / effort / permission /
     // context toolbar), not the ordinary chat one.

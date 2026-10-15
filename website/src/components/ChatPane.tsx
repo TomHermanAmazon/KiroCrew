@@ -8,7 +8,8 @@ import { EdgeFade, JumpToBottomButton } from '../app-sdk/ChatScrollChrome'
 import { DOCK_CLEARANCE_PX, useComposerDockMetrics } from '../pages/chat/composerDockMetrics'
 import ChatInput from './ChatInput'
 import { busySteerFlag } from './chat-input/busySend'
-import { filterCrewmateChat } from './chat/crewmateBubbles'
+import { filterCrewmateChat, withQueuedAsBubbles } from './chat/crewmateBubbles'
+import { AWAITING_REPLY_ACTIVITY, useCrewmateAwaitingReply } from './chat/useCrewmateAwaitingReply'
 import CrewmateLiveActivity from './chat/CrewmateLiveActivity'
 import { useCrewmateGreetingShown } from './chat/useCrewmateGreetingShown'
 import ErrorNotice from './ErrorNotice'
@@ -243,9 +244,15 @@ export default function ChatPane({
   // is the status line above the footer (`liveActivity`), not a transcript
   // row, so the working indicator holds still while steps come and go.
   const crewmateLive = running || !!paneSlot?.running
+  // The typing bubble shows from the person's Send, not only once the turn
+  // that answers is live (useCrewmateAwaitingReply).
+  const { awaitingReply, markSent: markCrewmateSent } = useCrewmateAwaitingReply(!!crewmate, slotKey, allMessages, crewmateLive)
+  const crewmateTyping = crewmateLive || awaitingReply
+  // Queued rows are drawn in place from the slot's full row list, so a parked
+  // message sits where it was sent (`withQueuedAsBubbles`).
   const messages = useMemo(
-    () => (crewmate ? filterCrewmateChat(paneMessages) : paneMessages),
-    [crewmate, paneMessages],
+    () => (crewmate ? filterCrewmateChat(withQueuedAsBubbles(allMessages, queuedMessages)) : paneMessages),
+    [crewmate, allMessages, paneMessages, queuedMessages],
   )
   // The host's greeting is drawn while it is still the newest word: a reply
   // landing after it (a patrol / wake turn keeps it up) takes it down.
@@ -263,6 +270,9 @@ export default function ChatPane({
     delegatedOnly: !!paneSlot?.subagents_running && !paneSlot?.running,
     stopping: !!paneSlot?.stopping,
   })
+  // The host declares the conversation surface; only the gateway decides
+  // how to prioritize the human's message on the validated member DM.
+  const composerBusyMode = crewmate ? 'responsive' : busyMode
   // The unfiltered rows, handed to the row set for the one read that must see
   // what the filter dropped (the steer-chip decision reads the policy-block
   // inject row). `undefined` for an ordinary chat, so its renderer set does not
@@ -408,7 +418,7 @@ export default function ChatPane({
     staleTime: Infinity,
   })
   useEffect(() => {
-    if (slotDetail?.messages) dispatch(hydrateSlotMessages({ slot: slotKey, messages: slotDetail.messages, hasMore: slotDetail.has_more, bounded: hydrateLimit !== undefined, total: slotDetail.total, running: slotDetail.running, nextBefore: slotDetail.next_before }))
+    if (slotDetail?.messages) dispatch(hydrateSlotMessages({ slot: slotKey, messages: slotDetail.messages, queue: slotDetail.queue, hasMore: slotDetail.has_more, bounded: hydrateLimit !== undefined, total: slotDetail.total, running: slotDetail.running, nextBefore: slotDetail.next_before }))
   }, [slotDetail, slotKey, dispatch, hydrateLimit])
 
   // Scroll follow (auto-pin, release, jump pill) is owned by the virtualizer
@@ -426,7 +436,7 @@ export default function ChatPane({
 
 
   const { messageQuote, paneHiddenCommands, slashError, setSlashError, doSend, doSteer, onDirectQuestionSend } = useChatPaneSend({
-    slotKey, crewmate, dispatch, draft, composerRef, busy, running, paneSlot, scrollToBottom, openSideChat, agentLocked, paneAgentName, pendingQuestion,
+    slotKey, crewmate, dispatch, draft, composerRef, busy, running, paneSlot, scrollToBottom, openSideChat, agentLocked, paneAgentName, pendingQuestion, markCrewmateSent,
   })
   const { recoverInto: recoverQuoteInto } = messageQuote
 
@@ -438,7 +448,7 @@ export default function ChatPane({
     // An attachment still uploading holds the composer: doSend owns that hold
     // (it ends the dictation and sends nothing) and doSteer has no copy of it.
     if (isComposerSendHeld(slotKey)) { doSend(); return }
-    const flag = busySteerFlag({ slotKey, busy, turnRunning: running, stopState: paneStopState, jevAutoConsented, busyMode })
+    const flag = busySteerFlag({ slotKey, busy, turnRunning: running, stopState: paneStopState, jevAutoConsented, busyMode: composerBusyMode })
     if (flag) doSteer(flag === 'auto' ? { auto: true } : undefined)
     else doSend()
   }
@@ -708,10 +718,13 @@ export default function ChatPane({
               <>
               {greetingShown && crewmateGreeting}
               {crewmate
-                ? crewmateLive && (
+                ? crewmateTyping && (
                   <CrewmateLiveActivity
                     key={slotKey}
-                    activity={liveActivity}
+                    // Before the answering turn runs there is no live reading
+                    // to name (the slot's status record is the last turn's),
+                    // so the caption says it is working on it.
+                    activity={crewmateLive ? liveActivity : AWAITING_REPLY_ACTIVITY}
                     streamingText={messages[messages.length - 1]?.role === 'streaming' && streamState === 'streaming'}
                     streamTick={
                       messages[messages.length - 1]?.role === 'streaming'
@@ -761,17 +774,19 @@ export default function ChatPane({
         <JumpToBottomButton visible={!isAtBottom && messages.length > 0} onClick={scrollToBottom} />
 
         <div className="dock-inert" data-testid="composer-status-stack">
-        <SubagentProgressBar slot={slotKey} />
+        {!crewmate && <SubagentProgressBar slot={slotKey} />}
 
-        <SubagentDeliveryProgress count={systemDeliveryCount} />
+        {!crewmate && <SubagentDeliveryProgress count={systemDeliveryCount} />}
         {/* Rendered on server state only. A `steer-only` host never ASKS for a
             queue, so in normal operation this stays empty there; it is not
             hidden by mode, because a message the server did park (a backend
             without a steer channel, a mid-plan send) must stay visible and
             cancellable — hiding real state is worse than showing a card the
             surface did not intend. */}
-        {queuedMessages.length > 0 && (
-          <QueueStack messages={queuedMessages} onCancel={onCancelQueued} onInterrupt={onInterruptQueued} onEdit={onEditQueued} onReorder={onReorderQueued} pendingIds={queuePendingIds} />
+        {/* A crewmate's chat draws a queued message as the person's own
+            bubble in the thread instead (`withQueuedAsBubbles`). */}
+        {!crewmate && queuedMessages.length > 0 && (
+          <QueueStack messages={queuedMessages} onCancel={onCancelQueued} onInterrupt={crewmate ? undefined : onInterruptQueued} onEdit={onEditQueued} onReorder={onReorderQueued} pendingIds={queuePendingIds} />
         )}
 
         {/* The pending ask_question card shares the message column's gutter and
@@ -917,16 +932,16 @@ export default function ChatPane({
           // Steer path on the pane too (it was queue-only before): busy panes
           // get the same mid-turn choice as the main chat, and a
           // `steer-only` host gets a plain send that steers.
-          canSteer={busy}
+          canSteer={!crewmate && busy}
           // `doSteer` takes no `text`: the pane derives its chips from the same
           // `busy` that gates the steer path, so a chip is never on screen while
           // a send would steer, and the composer draft is the only steer payload.
-          onSteer={doSteer}
+          onSteer={crewmate ? undefined : doSteer}
           // AND a turn actually running: `busy` also covers a slot whose
           // sub-agents are still working, where the send starts a fresh turn and
           // there is no running turn for the point to decide about.
           jevAutoAvailable={jevAutoConsented && running}
-          busyMode={busyMode}
+          busyMode={composerBusyMode}
           autoFocusKey={slotKey}
           agentName={paneAgentName}
           // The chip shows the inherited-default marker; `agentName` stays the

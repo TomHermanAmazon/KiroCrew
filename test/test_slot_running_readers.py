@@ -156,6 +156,8 @@ def test_running_and_turn_running_slot_readers_are_enumerated() -> None:
                 ("chat_api/slot_model.py", "api_chat_slots_model"),
                 ("chat_api/continue_turn.py", "continue_slot_turn"),
                 ("chat_api/turn_stop.py", "stop_slot_turn"),
+                # Stop settlement wakes retained priority only on an unreserved slot.
+                ("chat_api/turn_stop.py", "_make_stop_resolver"),
                 ("chat_rewind.py", "api_chat_slot_rewind"),
                 # The memory-ready queue drain starts a turn only on a slot no
                 # dispatch has reserved, the same guard the dispatch routes take.
@@ -202,6 +204,9 @@ def test_running_and_turn_running_slot_readers_are_enumerated() -> None:
                 # A guide or card tool call is admitted only from the turn this
                 # slot is executing; a reservation has no tool call yet.
                 ("handlers/guide.py", "_resolve_agent_caller"),
+                # A responsive steer needs a turn executing now; a reserved
+                # slot keeps the queue path.
+                ("responsive_chat.py", "_steer_ready"),
                 ("slot_projection.py", "SlotProjection.to_dict"),
                 ("slot_registry.py", "SlotRegistry.running_session_keys"),
                 ("state.py", "_ChatSlot.running"),
@@ -212,6 +217,7 @@ def test_running_and_turn_running_slot_readers_are_enumerated() -> None:
             for site in {
                 ("chat_api/slot_detail.py", "api_chat_slot_detail"),
                 ("chat_api/chat_send.py", "api_chat"),
+                ("responsive_chat.py", "accept"),
                 ("chat_regenerate.py", "_destructive_history_busy"),
                 ("chat_regenerate.py", "api_chat_slot_edit_resend"),
                 ("chat_regenerate.py", "api_chat_slot_regenerate"),

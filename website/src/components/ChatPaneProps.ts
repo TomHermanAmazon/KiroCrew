@@ -89,10 +89,9 @@ export interface ChatPaneProps {
    *  `'split'` — the same Steer/Queue split button as the main chat, which
    *  split-view (⌘D) panes keep: they are the main chat's own sessions seen
    *  side by side. A host that presents a conversation with ONE named peer
-   *  (the Members page's DM thread) passes `'steer-only'`: no queue concept,
-   *  every send while the member is working goes straight into its running
-   *  turn. Decided by the host, never inferred here, so no pane changes
-   *  behaviour by accident. */
+   *  may pass `'steer-only'`. A `crewmate` host instead uses `'responsive'`:
+   *  always ordinary Send, with priority owned by the gateway. Other panes
+   *  retain the explicit busy mode the host passed. */
   busyMode?: ComposerBusyMode
   /** This pane is a CREWMATE's chat (a member-mode slot on the Members page):
    *  the transcript shows only what the crewmate says to the user — the

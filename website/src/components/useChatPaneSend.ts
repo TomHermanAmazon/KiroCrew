@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, type RefObject } from 'react'
 import type { CrewmateIdentity } from '../pages/chat/CrewmateMessage'
 import { queuedSendStash } from '../hooks/useQueuedMessageActions'
 import { store, type AppDispatch, type RootState } from '../store'
-import { capturePendingAskId, confirmOptimisticSend, markSendUnconfirmed, resolveOptimisticSteer, selectSendConfirmed, appendSlotMessage, pendingQuestionFor } from '../store/chatSlice'
+import { capturePendingAskId, confirmOptimisticSend, markSendUnconfirmed, resolveOptimisticSteer, selectSendAccepted, selectSendConfirmed, appendSlotMessage, pendingQuestionFor } from '../store/chatSlice'
 import { readPaneDraft, writePaneDraft } from '../utils/chatPaneDrafts'
 import { expandAll as expandPasteTokens } from '../utils/pasteTokens'
 import { sendTurn, mintSendId, type SendReceiptStatus } from '../chat-core/transport/sendTurn'
@@ -37,7 +37,7 @@ const PANE_REFUSED_COMMANDS: readonly string[] = ['/kb']
  *  landed in the tail window the pin mounts (ChatPage uses the same figure). */
 const SCROLL_AFTER_RENDER_MS = 100
 
-export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRef, busy, running, paneSlot, scrollToBottom, openSideChat, agentLocked, paneAgentName, pendingQuestion }: {
+export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRef, busy, running, paneSlot, scrollToBottom, openSideChat, agentLocked, paneAgentName, pendingQuestion, markCrewmateSent }: {
   slotKey: string
   crewmate?: CrewmateIdentity
   dispatch: AppDispatch
@@ -51,6 +51,7 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
   agentLocked?: boolean
   paneAgentName: string
   pendingQuestion: ReturnType<typeof pendingQuestionFor>
+  markCrewmateSent: (sendId: string) => void
 }) {
   const { input, setInput, pendingFiles, setPendingFiles, pasteBlocks, setPasteBlocks, readPastes, slotKeyRef, inputRef, mountedRef, restoreIntoComposer } = draft
   // In-pane report of a client-only slash command that did not run, keyed by
@@ -243,16 +244,20 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
     // the optimistic bubble — without this id the echo appends a SECOND user
     // bubble carrying the raw marker.
     const sendId = mintSendId()
-    // Optimistic user bubble: show immediately in the right position (mirrors the
-    // single-chat send). Skipped while busy (main turn streaming OR sub-agents
-    // running). A real queue has its own card; an immediate dispatch supplies
-    // the skipped row through its correlated user echo.
+    // A crewmate send always appears immediately and stays one bubble: a real
+    // queued receipt keeps it, and the queue entry takes its place in the
+    // thread. Ordinary Sessions keep their busy-send bubble policy and
+    // correlated server echo.
     const meta = { ...turn.meta, sendId }
-    const bubbleMinted = !busy && (text || files.length || sentQuote)
+    const bubbleMinted = (!!crewmate || !busy) && (text || files.length || sentQuote)
     if (bubbleMinted) {
+      if (crewmate) {
+        drainPendingChunks()
+        markCrewmateSent(sendId)
+      }
       dispatch(appendSlotMessage({
         slot: slotKey,
-        message: { role: 'user', content: displayTxt, cls: 'msg msg-u', ts: new Date().toISOString(), ...(meta ? { meta } : {}) },
+        message: { role: 'user', content: displayTxt, cls: 'msg msg-u', ts: new Date().toISOString(), meta: { ...meta, ...(crewmate ? { responsiveSend: true } : {}) } },
       }))
     }
     // Sending is explicit intent to be at the end, so the pane force-pins the
@@ -279,7 +284,7 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
     // `response-late` proves no refusal either; restoring either one here could
     // invite a retry that duplicates a turn already in flight, side effects
     // included, so the optimistic composer row stays pending.
-    void sendTurn({ message: llm, slot: slotKey, meta, ...(steerNow ? { steer: true } : {}) }).then((receipt) => {
+    void sendTurn({ message: llm, slot: slotKey, meta, ...(crewmate ? { responsive: true } : steerNow ? { steer: true } : {}) }).then((receipt) => {
       // Receipt policy, owned once in chat-core (issue #9457). This is the
       // PARTIAL copy: doSend is a full send, not only a steer, so the rulings
       // applySteerReceipt owns (echo short-circuit, refused/response-late/
@@ -288,11 +293,11 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
       // card + blocking-ask resolution) stays here, AFTER the rulings, because
       // it must run on every accepted receipt including a `steered` one.
       applySteerReceipt(receipt, {
-        // A busy send always mints a sendId; the echo (queue/steer_push) that
-        // carries it reconciles the row. Only this send's id counts -- a queued
-        // card carries none and matching by text cannot tell this send from an
-        // identical one queued meanwhile.
+        // Exact send identity proves custody through either queue or user echo.
+        // Queue custody suppresses duplicate recovery, not the cancellable card;
+        // only the drain/user echo proves execution.
         echoReconciled: () => selectSendConfirmed(store.getState(), slotKey, sendId),
+        sendAccepted: () => !!crewmate && selectSendAccepted(store.getState(), slotKey, sendId),
         // A BUSY send minted no optimistic bubble (bubbleMinted false: the
         // server's queue/steer echo was to be the representation), so the text
         // exists nowhere on screen and must be handed back. The gate differs by
@@ -336,6 +341,14 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
         // of when the correlated echo arrives, and confirmOptimisticSend no-ops
         // when a busy send skipped the bubble.
         resolveBubble: (outcome) => {
+          // A responsive send always has a bubble: a refusal replaces it, an
+          // indeterminate response keeps it pending, and a real queue keeps
+          // it too -- the queued entry takes the bubble's place and key
+          // (appendCorrelatedQueue), so the person's message never leaves the
+          // thread to be redrawn at the bottom.
+          if (crewmate && outcome === 'drop' && receipt.status !== 'response-late' && receipt.status !== 'queued') {
+            dispatch(resolveOptimisticSteer({ slot: slotKey, sendId, outcome: 'queued' }))
+          }
           if (outcome !== 'turn') return
           dispatch(confirmOptimisticSend({
             slot: slotKey,
@@ -362,7 +375,7 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
       if (!askAtSend) return
       void resolveAskAfterSend(receipt.body, askAtSend, dispatch, slotKey)
     })
-  }, [input, pendingFiles, pasteBlocks, setPasteBlocks, busy, slotKey, dispatch, restoreIntoComposer, reportSendFailure, scrollToBottom, consumeQuote, recoverQuoteInto, interceptPaneSlash, composerRef, mountedRef, slotKeyRef, setInput, setPendingFiles])
+  }, [input, pendingFiles, pasteBlocks, setPasteBlocks, busy, crewmate, slotKey, dispatch, restoreIntoComposer, reportSendFailure, scrollToBottom, consumeQuote, recoverQuoteInto, interceptPaneSlash, markCrewmateSent, composerRef, mountedRef, slotKeyRef, setInput, setPendingFiles])
 
   // Mid-turn steer: inject the composer content into the RUNNING turn instead
   // of queueing behind it. The pane's counterpart to ChatPage.steer, on the
@@ -451,6 +464,7 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
         // the bubble: the steer landed, so an indeterminate transport outcome
         // is ignored.
         echoReconciled: () => selectSendConfirmed(store.getState(), slotKey, sendId),
+        sendAccepted: () => !!crewmate && selectSendAccepted(store.getState(), slotKey, sendId),
         // refused / response-late hand the payload back into this pane's
         // composer (raw text + files), addressed to the slot it was typed into.
         restore: () => restoreIntoComposer(recoverQuoteInto(raw, sentQuote, mountedRef.current && slotKey === slotKeyRef.current), files, steerPastes, slotKey),
@@ -475,7 +489,7 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
         void resolveAskAfterSend(receipt.body, askAtSteer, dispatch, slotKey)
       }
     })
-  }, [running, paneSlot?.running, doSend, input, pendingFiles, pasteBlocks, setPasteBlocks, slotKey, dispatch, reportSendFailure, restoreIntoComposer, consumeQuote, recoverQuoteInto, interceptPaneSlash, composerRef, mountedRef, slotKeyRef, setInput, setPendingFiles])
+  }, [running, paneSlot?.running, doSend, input, pendingFiles, pasteBlocks, setPasteBlocks, slotKey, dispatch, reportSendFailure, restoreIntoComposer, consumeQuote, recoverQuoteInto, interceptPaneSlash, crewmate, composerRef, mountedRef, slotKeyRef, setInput, setPendingFiles])
 
   // The pending-question card's one-click answer (`PendingQuestionCard.onDirectSend`).
     /* No-ask_id card: the card IS the interaction, answered in one click.
@@ -526,27 +540,30 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
     // answer stays in the transcript and survives reload), and every
     // other outcome (`queued`/drop) REMOVES it (so a queued answer shows
     // only as its QueueStack card, never a duplicate, and a failed one
-    // leaves no orphan). The card cleared on submit, so a genuine
+    // leaves no orphan; a crewmate chat, which draws no queue card,
+    // keeps the queued answer's bubble instead). The card cleared on submit, so a genuine
     // non-delivery hands the answer back to the composer via `restore`,
     // UNLESS the `steer_push`/user echo carrying this `sendId` already
     // reconciled the bubble -- proof it landed, so no restore and no
     // duplicate. Only the `steer` POST flag and the pre-append chunk
     // drain differ between the two routes.
-    const steerLive = busy && pendingQuestion?.native === true
+    const steerLive = (busy || (!!crewmate && (running || !!paneSlot?.running))) && pendingQuestion?.native === true
     const sendId = `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     // Drain the per-frame chunk buffer before the append, as `doSteer`
     // does: a pre-steer chunk still buffered means the finalize-on-steer
     // finds no streaming row, so the bubble would flush BELOW it and
     // post-steer chunks would corrupt transcript order (#6075 class).
     // Only a live steer injects into a streaming turn, so only it drains.
-    if (steerLive) drainPendingChunks()
-    dispatch(appendSlotMessage({ slot: slotKey, message: { role: 'user', content: text, cls: 'msg msg-u', ts: new Date().toISOString(), meta: { ...(steerLive ? { steer: true } : {}), optimistic: true, sendId } } }))
-    void sendTurn({ message: text, slot: slotKey, meta: { sendId }, ...(steerLive ? { steer: true } : {}) }).then((receipt) => {
+    if (steerLive || crewmate) drainPendingChunks()
+    if (crewmate) markCrewmateSent(sendId)
+    dispatch(appendSlotMessage({ slot: slotKey, message: { role: 'user', content: text, cls: 'msg msg-u', ts: new Date().toISOString(), meta: { ...(steerLive ? { steer: true } : {}), ...(crewmate ? { responsiveSend: true } : {}), optimistic: true, sendId } } }))
+    void sendTurn({ message: text, slot: slotKey, meta: { sendId }, ...(crewmate ? { responsive: true } : {}), ...(steerLive ? { steer: true } : {}) }).then((receipt) => {
       applySteerReceipt(receipt, {
         // A confirmed echo is stronger evidence than a missing/late HTTP
         // response: if it landed, do NOT restore (the fix for the
         // "confirmed steers restored as failed" finding).
         echoReconciled: () => selectSendConfirmed(store.getState(), slotKey, sendId),
+        sendAccepted: () => !!crewmate && selectSendAccepted(store.getState(), slotKey, sendId),
         // The card cleared on submit, so the answer lives nowhere else:
         // hand it back on every non-delivered ruling. The bubble is
         // dropped by `resolveBubble` below, so this never leaves an
@@ -562,7 +579,12 @@ export function useChatPaneSend({ slotKey, crewmate, dispatch, draft, composerRe
         // a turn; drop it on every other outcome (queued/refused/late) so
         // a queued answer shows only as its QueueStack card and a failed
         // one leaves no orphan.
-        resolveBubble: (outcome) => dispatch(resolveOptimisticSteer({ slot: slotKey, sendId, outcome: outcome === 'turn' ? 'turn' : 'queued' })),
+        resolveBubble: (outcome) => {
+          // A crewmate chat keeps a queued answer's bubble: its queued
+          // entry takes the bubble's place (appendCorrelatedQueue).
+          if (crewmate && receipt.status === 'queued') return
+          dispatch(resolveOptimisticSteer({ slot: slotKey, sendId, outcome: outcome === 'turn' ? 'turn' : 'queued' }))
+        },
         // Text-only card answer: no queued-stash binding to carry.
         stashDemoted: () => undefined,
       })

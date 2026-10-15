@@ -1474,7 +1474,7 @@ function ChatInput({
             {/* The busy branch is reachable with EITHER a stop affordance or a
                 steer path: a host without onStop still needs the split
                 steer/queue button while a turn runs. */}
-            {compacting && !isRunning && !composerHasDraft && (!stopState || stopState === 'idle') ? (
+            {busyMode !== 'responsive' && compacting && !isRunning && !composerHasDraft && (!stopState || stopState === 'idle') ? (
               // An automatic compaction holds the session. It is NOT a turn
               // (`isRunning` is false), so without this branch the composer
               // read idle and the only affordance was Send. Yields to a LIVE
@@ -1485,8 +1485,15 @@ function ChatInput({
               // the idle Send queues the message behind the compaction, so a
               // user with something to say is never left without a send.
               <CompactingIndicator />
-            ) : (isRunning || stopState === 'soft_pending' || stopState === 'killing') && (onStop || (!terminal.active && canSteer && onSteer)) ? (
+            ) : busyMode !== 'responsive' && (isRunning || stopState === 'soft_pending' || stopState === 'killing') && (onStop || (!terminal.active && canSteer && onSteer)) ? (
               <BusySendControls stopState={stopState} killingEscaped={killingEscaped} stopWithTap={stopWithTap} isQueued={isQueued && !terminal.active} composerHasDraft={composerHasDraft && !terminal.active} canSteer={canSteer} onSteer={onSteer} steerOnly={steerOnly} fireComposer={fireComposer} disabled={disabled} holdSend={holdSend} holdSendReason={holdSendReason} connected={connected} effectiveBusyMode={effectiveBusyMode} setBusySendMode={setBusySendMode} onBusyModePicked={focusComposerAfterPick} sendOnEnter={sendOnEnter} jevAutoAvailable={jevAutoAvailable} onStop={onStop} terminalActive={terminal.active} stopDeclinedArmed={stopDeclinedArmed} />
+            ) : busyMode === 'responsive' && onStop && ((isRunning && !composerHasDraft) || stopState === 'soft_pending' || stopState === 'killing') ? (
+              // Responsive (crewmate) mode keeps the Stop control: an empty
+              // composer mid-turn is Stop, and a stop in progress keeps its
+              // escalation states. Once the person types, the plain Send below
+              // returns -- never the steer/queue split -- and the gateway
+              // decides how that send reaches the running turn.
+              <BusySendControls stopState={stopState} killingEscaped={killingEscaped} stopWithTap={stopWithTap} isQueued={false} composerHasDraft={false} canSteer={false} steerOnly={false} fireComposer={fireComposer} disabled={disabled} holdSend={holdSend} holdSendReason={holdSendReason} connected={connected} effectiveBusyMode={effectiveBusyMode} setBusySendMode={setBusySendMode} sendOnEnter={sendOnEnter} jevAutoAvailable={false} onStop={onStop} terminalActive={terminal.active} stopDeclinedArmed={stopDeclinedArmed} />
             ) : !terminal.active && (<>
               {promptOptimizer && <button
                 className={`w-8 h-8 rounded-lg border-none flex items-center justify-center cursor-pointer transition-all disabled:cursor-not-allowed ${optimizing ? 'bg-accent/20 text-accent animate-pulse' : 'bg-transparent text-muted hover:text-accent hover:bg-accent/10 disabled:opacity-40 disabled:hover:text-muted disabled:hover:bg-transparent'}`}

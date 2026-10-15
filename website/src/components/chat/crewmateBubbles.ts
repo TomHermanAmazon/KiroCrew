@@ -61,6 +61,7 @@ const WITHIN_TURN_ROLES: ReadonlySet<string> = new Set([
  *  non-empty and the crewmate's empty hint would never show. */
 const MACHINERY_ROLES: ReadonlySet<string> = new Set([
   'nudge', 'inject', 'subagent', 'tool', 'tool_call', 'tool_result', 'thinking', 'done',
+  ...REASONING_ROLES,
 ])
 
 /** A turn's progress rows: tool calls (the 🔧 line and its hidden ✅ / 🚫
@@ -104,35 +105,15 @@ export function isCrewmateSpeech(m: ChatMessage): boolean {
   return !isHiddenInvisibleAssistantRow(m) && !isSystemNoticeRow(m) && !isWorkflowCompletionMessage(m) && !isSubagentCompletionMessage(m)
 }
 
-/** The `notice` kinds a crewmate's chat drops: the runtime's own machinery that
- *  the person has nothing to do with. `empty_turn` is the runner's empty-response
- *  recovery card (`chat_utils.EMPTY_TURN_NOTICE_KIND`); `arm_refusal` is the
- *  automation arm/revision/stop refusal (`session_directive_apply.ARM_REFUSAL_NOTICE_KIND`),
- *  which is re-routed to the crewmate's next turn as an `inject` row instead;
- *  `spec_hooks` is the session-start notice about an agent spec's hooks that do
- *  not run (`chat_utils.SPEC_HOOKS_NOTICE_KIND`), drawn on the Sessions page.
- *  Every notice OUTSIDE this set names something the person may have to act on
- *  (a dropped queued message, a model-fallback hint) and keeps drawing. */
-const CREWMATE_HIDDEN_NOTICE_KINDS: ReadonlySet<string> = new Set(['empty_turn', 'arm_refusal', 'spec_hooks'])
-function isHiddenCrewmateNotice(m: ChatMessage): boolean {
-  const kind = (m.meta as { kind?: unknown } | undefined)?.kind
-  return typeof kind === 'string' && CREWMATE_HIDDEN_NOTICE_KINDS.has(kind)
-}
-
 /** Whether a row is drawn in a crewmate's chat at all. */
 export function isCrewmateChatRow(m: ChatMessage): boolean {
   if (MACHINERY_ROLES.has(m.role)) return false
   if (m.role === 'assistant') return isCrewmateSpeech(m)
+  // A stop card records the person's own Stop press, so it stays drawn.
   if (m.role === 'system') return isStopCard(m)
-  // A crewmate's chat shows messages only, so a `notice` the runtime writes
-  // about its OWN machinery is dropped — an empty-turn recovery card, and the
-  // automation arm/revision/stop refusal, which reaches the crewmate through
-  // its next turn instead (`session_directive_apply`). The drop is by an
-  // ALLOWLIST of those kinds, never by role: a notice the PERSON must act on
-  // (a dropped queued message, a model-fallback hint, a directive-not-applied
-  // warning) has no second route, so it keeps drawing. The Sessions page draws
-  // every notice as today.
-  if (m.role === 'notice') return !isHiddenCrewmateNotice(m)
+  // Runtime notices belong to Sessions, not the conversation with a person
+  // (docs/decisions/2026-10-09-crewmate-chat-draws-messages-only.md).
+  if (m.role === 'notice') return false
   // A pending approval is the approval surface and stays; a RESOLVED one draws
   // nothing (its renderer returns null) and must not count as content — kept,
   // it would hide the quiet hint behind a blank chat. Same rule `isRunTransparent`
@@ -149,6 +130,66 @@ export function isCrewmateChatRow(m: ChatMessage): boolean {
 export function filterCrewmateChat(messages: ChatMessage[]): ChatMessage[] {
   const kept = messages.filter(isCrewmateChatRow)
   return kept.length === messages.length ? messages : kept
+}
+
+/** A crewmate's chat has no queue card: a message the gateway parked for the
+ *  next turn is still just the person's message, so it is drawn as their own
+ *  bubble WHERE IT WAS SENT until the drain replaces it with the real user row
+ *  -- iMessage order: whatever arrives after it (a reply to an earlier message
+ *  included) draws below it. `all` is the slot's rows in store order, queued
+ *  rows in place; `queued` is the queued rows this chat draws (the interactive
+ *  ones), every other queued row is dropped. A queued entry whose send already
+ *  has its row -- a steer the turn did not take, requeued for the next one --
+ *  is that same message, so it draws no second bubble. An injected entry (a
+ *  cron notification, an MCP-App message) is not the person's speech either:
+ *  its drained row is machinery this chat hides, so it draws no bubble. Same
+ *  array identity back when `all` holds no queued row. */
+export function withQueuedAsBubbles(all: ChatMessage[], queued: ChatMessage[]): ChatMessage[] {
+  if (!all.some(m => m.role === 'queued')) return all
+  const drawn = new Set(queued)
+  const shown = new Set(all.filter(m => m.role === 'user' && m.meta?.sendId).map(m => m.meta?.sendId))
+  const out: ChatMessage[] = []
+  for (const m of all) {
+    if (m.role !== 'queued') { out.push(m); continue }
+    if (!drawn.has(m) || isInjectedQueued(m) || (m.meta?.sendId && shown.has(m.meta.sendId))) continue
+    out.push({ ...m, role: 'user', cls: 'msg msg-u', meta: { ...m.meta, queuedBubble: true } })
+  }
+  return out
+}
+
+/** A queued row the gateway injected rather than the person typed. Read from
+ *  the structured tags the server writes at enqueue time, never from the text:
+ *  the live row carries its `cls` labels (`cronLabel`, `appLabel`), the queue
+ *  hydration carries the entry's `kind` (`queue.ts`). The person's own send
+ *  has none of them, matching the backend's kind-only `is_system_injection_item`. */
+function isInjectedQueued(m: ChatMessage): boolean {
+  const meta = m.meta
+  return !!(meta?.kind || meta?.cronLabel || meta?.appLabel || meta?.injectKind)
+}
+
+/** Whether the person's send `sendId` is still waiting on the crewmate: its
+ *  row (sent, queued or drained) is in `all` (the slot's rows in store order),
+ *  its delivery is not in doubt, and nothing has answered it yet -- no
+ *  assistant row after it (speech, or the say-nothing row a quiet turn ends
+ *  on), no error, no stop card, no pending approval and no change card. While
+ *  this holds the chat shows its typing bubble even before the turn that will
+ *  answer is running: a live turn alone starts seconds after the send when the
+ *  send was queued or interrupted and requeued. A refused send's bubble is
+ *  gone, so it waits on nothing. */
+export function awaitingCrewmateReply(all: ChatMessage[], sendId: string | undefined): boolean {
+  if (!sendId) return false
+  let i = all.length - 1
+  for (; i >= 0; i -= 1) {
+    const m = all[i]
+    if ((m.role === 'user' || m.role === 'queued') && m.meta?.sendId === sendId) break
+  }
+  if (i < 0 || all[i].meta?.deliveryUnconfirmed) return false
+  for (let j = i + 1; j < all.length; j += 1) {
+    const m = all[j]
+    if (m.role === 'assistant' || m.role === 'error' || m.role === CARD_ROW_ROLE || isStopCard(m)) return false
+    if (m.role === 'permission' && !m.meta?.resolved) return false
+  }
+  return true
 }
 
 /** Nearest row in `dir` that is not run-transparent, or undefined at an end. */
