@@ -66,21 +66,6 @@ export type BulkIssue = {
   kind: 'changed' | 'preview_failed' | 'write_failed'
 }
 
-/** Pair each command with its declared environment, dropping empty commands. */
-export function pairLaunches(
-  commands?: string[][],
-  envs?: string[][],
-): { argv: string[]; env: string[] }[] {
-  return (commands ?? [])
-    .map((argv, i) => ({ argv, env: envs?.[i] ?? [] }))
-    .filter((launch) => launch.argv.length > 0)
-}
-
-/** Each launch a refusal covers: its command and its declared environment. */
-export function refusalLaunches(refusal: LaunchRefusal): { argv: string[]; env: string[] }[] {
-  return pairLaunches(refusal.commands, refusal.envs)
-}
-
 /**
  * True when the launch on screen is the WHOLE launch, so an approval can name it.
  *
